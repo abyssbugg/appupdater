@@ -104,28 +104,29 @@ Point at files that exist. A missing doc is a gap to flag, not a file to invent 
 
 ## Verification gate
 
-The standing gate CLAUDE.md §6 requires. Copy-paste commands only. Keep this block in lockstep with reality.
-
-Project source exists? not yet (scaffold = first build phase). Current working gate once scaffolded:
+The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from this session (2026-10-26, Phase 1 close).**
 
 ```
-swift build (SPM) or xcodebuild -project AppUpdater.xcodeproj -scheme AppUpdater build   # build green
-swiftlint (to be added to toolchain)                                                    # lint 0 warnings
-swift test                                                                              # test suite 0 fail
-codesign -v --strict AppUpdater.app                                                     # signature valid
+swift build                                    # PROVEN exit=0
+swift test                                     # PROVEN exit=0 — 2 tests / 1 suite (Swift Testing)
+Scripts/make-app.sh release                    # PROVEN prints "Assembled: build/AppUpdater.app"
+codesign -v --strict build/AppUpdater.app      # PROVEN OK (adhoc signature)
+plutil -lint build/AppUpdater.app/Contents/Info.plist   # PROVEN OK
+launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN pid created, zero crash reports in ~/Library/Logs/DiagnosticReports, clean quit
 ```
 
-- Gate commands are **intended**, not yet proven — source does not exist yet. First green build lands proof here.
+- swiftlint is still NOT installed (`brew install swiftlint` pending) — that gate line stays unverified and is treated as debt, not skipped silently.
 - A change is done when every line of this gate has evidence from this session. Anything skipped is **unverified**.
 
 ---
 
 ## Gotcha ledger (read before touching the matching area)
 
-*(Empty — nothing paid for in-repo yet. Entries land when code pain is paid for; format below.)*
-
 ```
-- **{thing that bites}** — {the actual rule}. Symptom: {what it looked like}. Fix: {what works}. Evidence: `{path or PR}`.
+- **SwiftPM error output on Xcode 27-beta** — the real diagnostic hides under a giant "Failed frontend command" echo; `tail`/pipe truncation loses it. Symptom: build "fails" with no visible error line, repeated confusion. Fix: `swift build > log 2>&1; grep "error:" log`. Evidence: Phase 1 debugging round-trip.
+- **XCTest discovery broken on this toolchain** — Xcode 27.0 beta / Swift 6.4: `swift test` logs "Test Suite passed" with **0 tests collected**; exit code lies green. Symptom: silent gap in coverage. Fix: write tests with Swift Testing (`import Testing`, `@Test`, `#expect`) and require a nonzero test count in gate output; also note Swift Testing does not re-export Foundation (tests need their own `import Foundation`). Evidence: `/tmp`-captured logs Phase 1; `Tests/AppUpdaterCoreTests/ScaffoldSanityTests.swift`.
+- **Cross-surface edits in the app shell** — `AppUpdaterApp.swift` (scenes) and view/state files drift silently: removing `AppState.requestMainWindow()` while the scene still called it produced a misleading key-path error (`has no dynamic member … using key path`), NOT a "missing function" error. Fix: after changing AppState's surface, grep the app target for stale call sites; prefer `@Environment(\.openWindow)` + `openWindow(id:)` over any notification relay for menu-bar → main-window opening (macOS 15). Evidence: `Sources/AppUpdaterApp/AppUpdaterApp.swift`.
+- **SPM scratch path quirk on this machine** — Xcode-beta toolchain writes intermediates to `.build/out/*` but final products remain at the standard `.build/<config>/AppUpdaterApp`; `Scripts/make-app.sh` relies on the standard path. If a future Xcode drop moves products, make-app.sh is the first thing to check. Evidence: Phase 1 assembly.
 ```
 
 ---
