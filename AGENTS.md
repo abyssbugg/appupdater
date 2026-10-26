@@ -14,7 +14,7 @@ You are working in the **AppUpdater** project. This file is the canonical contin
 |---|---|
 | **Name** | **`AppUpdater`** |
 | **Local path** | `/Users/datamatics/dev/appupdater` |
-| **Canonical remote** | none yet — local git only (owner asked; pending visibility choice: private-first vs public repo under `abyssbugg`) |
+| **Canonical remote** | `github.com/abyssbugg/appupdater` (PRIVATE — created 2026-10-26; source of truth for pull/push) |
 | **Live surfaces** | none yet (planned: signed/notarized macOS app; self-updates via Sparkle appcast; no owner-operated server required for v1) |
 | **Phase** | prototype (code build starting; analysis phase complete) |
 | **Owner intent** | hybrid macOS app updater combining MacUpdater's execution engine (scan, one-click install, backups, privileged install path, scheduler) with Updatest's serverless source strategy (public cask index, app's own Sparkle appcast, GitHub/Electron, App Store lookup). For the owner AND public release. |
@@ -30,6 +30,9 @@ You are working in the **AppUpdater** project. This file is the canonical contin
 5. **Audience BOTH:** private use and public release → build code-signable/notarizable from day one; zero hard dependency on an owner-operated server; public data sources first. Locked 2026-10-26.
 6. **Security floor:** HTTPS-only downloads; SHA-256 (or EdDSA-signed artifact) verification before replace; EdDSA (`SUPublicEDKey`) for our own updates; root operations only via SMAppService-style daemon (never `AuthorizationExecuteWithPrivileges`). Locked 2026-10-26. **Auth-touching code gets a threat-model review before implementation (CLAUDE.md §7).**
 7. **Not building UI before scan/update pipeline core is real.** Engine-first phase order. Locked 2026-10-26.
+8. **Stack freeze:** Swift 6.4, Xcode 27 project toolchain, SwiftPM dependency management; app dependency: **Sparkle 2** (self-update only); UI: SwiftUI window + AppKit menu-bar shell (LSUIElement); **deployment target macOS 15.0**. Locked 2026-10-26 (owner answering 4-question gate).
+9. **Signing mode (until owner joins Developer Program):** personal-use signing with the existing machine identity (`Spike0 Signing` dev-class) for local builds/testing; public distribution (Developer ID + notarization) is **deferred**, flagged in open items, and never silently assumed. Locked 2026-10-26.
+10. **Parallel-work discipline (owner-directed):** use git worktrees + subagents to cover independent lanes and never let the privileged-helper path slow core progress — but strictly per CLAUDE.md §5: phases sequential, lanes parallel, non-overlapping file ownership, verified-before-done. No unprofessional race-to-clone. Locked 2026-10-26.
 
 Add locks as they are decided. Remove a lock only when the owner supersedes it in writing here and in `docs/archive/AGENT_LOG.md`.
 
@@ -129,11 +132,12 @@ codesign -v --strict AppUpdater.app                                             
 
 ## Current open items
 
-- [ ] **Stack freeze confirmation** — proposed: Swift 6.4 / Xcode 27 (beta on this machine) project + SwiftPM; dependency: Sparkle 2 (self-update); deployment target macOS 15.0. Evidence: Xcode-beta 27.0 Build 27A5194q, swift-driver 1.167 (Apple Swift 6.4), macOS 27.2 — verified live. Remaining: owner sign-off.
-- [ ] **Apple Developer ID signing certificate** — only macOS identity currently in keychain is `Spike0 Signing` (dev-class, NOT Developer ID). Personal builds/signing OK for local use; **public notarized release requires Apple Developer Program membership**. Evidence: `security find-identity -v -p codesigning` (1 identity "Spike0 Signing"). Remaining: owner enrollment/assignment.
-- [ ] **Root helper phase timing** — recommended phase 2 (plain user-space installs cover most apps; PKG/hard cases need the daemon). Owner同意 pending.
-- [ ] **Canonical remote creation** — `gh auth status` ✓ logged in as `abyssbugg` (repo scope). Pending owner pick: `private` repo first (recommended) vs `public`. Local `git init` done at project start.
-- [ ] **v1 source set sign-off** — cask JSON index + app's own Sparkle appcast + MAS (iTunes lookup) + GitHub optional-flag; Electron/scrape deferred. Evidence: verified live samples in `docs/evidence/`.
+- [x] **Stack freeze** — Swift 6.4 / Xcode 27 / SwiftPM / Sparkle 2 / SwiftUI+AppKit shell / deployment target **macOS 15.0**. Owner sign-off 2026-10-26 (LOCKED decision 8).
+- [x] **Canonical remote** — `abyssbugg/appupdater` private repo created + pushed 2026-10-26 (LOCKED table above).
+- [x] **v1 source set** — cask JSON index + app's own Sparkle appcast + MAS (iTunes lookup) + GitHub optional-flag; Electron/scrape deferred. Evidence: live samples in `docs/evidence/`.
+- [ ] **Apple Developer Program enrollment** — owner confirmed "personal use for now" 2026-10-26. Until enrolled: local dev-class signing (`Spike0 Signing`) only; **no distribution claims**. When enrolled: Developer ID App + Installer certs, notarization joins the release pipeline. Evidence: `security find-identity -v -p codesigning`.
+- [ ] **Privileged helper** — owner directed parallel coverage via worktrees/subagents (LOCKED decision 10): may run as its own concurrent lane, but is auth-touching ⇒ **threat-model review before any implementation** (CLAUDE.md §7). Landed value shows with PKG/hard cases; not a v1 blocker either way.
+- [ ] **swiftlint not installed** — `brew install swiftlint` before the lint gate line becomes real.
 
 ---
 
