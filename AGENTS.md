@@ -1,0 +1,144 @@
+# Project Rules (ALWAYS LOAD)
+
+You are working in the **AppUpdater** project. This file is the canonical continuity contract for every coding-agent session started in this directory, whatever the agent (Claude, Grok, Codex, ZCode, droid, or other). Read it fully before acting — **together with `CLAUDE.md`, which holds the binding Operating protocol (HOW to work)**. Treat locked decisions as ground truth. If a request conflicts with them, flag the conflict and wait.
+
+**CRITICAL: You must open and read the contents of `CLAUDE.md` before writing any code.**
+
+**Full work history (verbatim):** `docs/archive/AGENT_LOG.md`. Completed entries retire there; this file stays lean.
+
+---
+
+## Project identity
+
+| Field | Value |
+|---|---|
+| **Name** | **`AppUpdater`** |
+| **Local path** | `/Users/datamatics/dev/appupdater` |
+| **Canonical remote** | none yet — local git only (owner asked; pending visibility choice: private-first vs public repo under `abyssbugg`) |
+| **Live surfaces** | none yet (planned: signed/notarized macOS app; self-updates via Sparkle appcast; no owner-operated server required for v1) |
+| **Phase** | prototype (code build starting; analysis phase complete) |
+| **Owner intent** | hybrid macOS app updater combining MacUpdater's execution engine (scan, one-click install, backups, privileged install path, scheduler) with Updatest's serverless source strategy (public cask index, app's own Sparkle appcast, GitHub/Electron, App Store lookup). For the owner AND public release. |
+
+---
+
+## Non-negotiable decisions (LOCKED)
+
+1. **Project name is `AppUpdater`.** Bundle ID proposal `io.appupdater.AppUpdater` (adjustable only before first signed release). Owner accepted 2026-10-26.
+2. **Scope BOTH:** app updates *other* installed apps AND self-updates via Sparkle. Locked 2026-10-26.
+3. **Architecture HYBRID:** MacUpdater execution engine + Updatest source strategy, one app. Locked 2026-10-26.
+4. **Mac App Store apps BOTH modes:** inform-only display AND a force-update path including MAS→vendor-download replacement. Locked 2026-10-26.
+5. **Audience BOTH:** private use and public release → build code-signable/notarizable from day one; zero hard dependency on an owner-operated server; public data sources first. Locked 2026-10-26.
+6. **Security floor:** HTTPS-only downloads; SHA-256 (or EdDSA-signed artifact) verification before replace; EdDSA (`SUPublicEDKey`) for our own updates; root operations only via SMAppService-style daemon (never `AuthorizationExecuteWithPrivileges`). Locked 2026-10-26. **Auth-touching code gets a threat-model review before implementation (CLAUDE.md §7).**
+7. **Not building UI before scan/update pipeline core is real.** Engine-first phase order. Locked 2026-10-26.
+
+Add locks as they are decided. Remove a lock only when the owner supersedes it in writing here and in `docs/archive/AGENT_LOG.md`.
+
+---
+
+## Operating protocol (HOW to work — BINDING, lives in `CLAUDE.md`)
+
+The full operating protocol lives in **`CLAUDE.md`** and is binding for every session, every agent: sequential-thinking decomposition before code, deliberate tool selection, comprehension before change, no bug-on-bug patching, phase-sequential / subagent-parallel execution, the verification gate, and honest reporting.
+
+**CRITICAL: You must open and read the contents of `CLAUDE.md` before writing any code.** This file (AGENTS.md) is the WHAT — locked facts, gotchas, open items; CLAUDE.md is the HOW.
+
+---
+
+## Product model (what we build)
+
+```
+User → AppUpdater.app (menu-bar app + window, LSUIElement)
+     → ScanEngine (enumerate /Applications + custom folders, Info.plist with fixups)
+     → SourceStrategy (MAS receipt+iTunes lookup → cask JSON index → app's own Sparkle
+       appcast → GitHub releases → [opt-in, later: Electron endpoints / vendor scrape])
+     → VersionOracle (Sparkle-style comparator + special cases)
+     → Installer (download HTTPS → verify SHA-256/EdDSA → backup DMG/ZIP → quit-running-app
+       flow → atomic swap JMSUPlainInstaller-style → relaunch → post-scan)
+     → Optional privileged daemon (SMAppService, phase 2) for PKGs + password-less installs
+     → Self-update (Sparkle 2 appcast + EdDSA signing in release pipeline)
+```
+
+- Product class: macOS maintenance/update manager. Reference products: MacUpdater 3, Updatest 3.
+- Honest boundary: shows truthful newest-version data from live public sources; no fake "success"; apps we cannot verify are labeled unknown, never guessed.
+- Deep architecture + field evidence: `docs/MACUPDATER-BREAKDOWN.md`.
+
+## Out of scope
+
+- No vendor-specific autoupdater interference list hacks in v1 (Adobe/BattleNet-style built-in updaters are skipped, not fought).
+- No scraping tier in v1 (deferred until public sources exhausted).
+- No iOS/iPadOS support; macOS only.
+
+---
+
+## Continuity rules for every new session in this folder
+
+When the user says "continue" / resumes work here:
+
+1. **Assume this AGENTS.md + `docs/` are ground truth.**
+2. Restate locked decisions briefly only if the user seems lost — do not re-litigate them.
+3. Honor every LOCKED item. Flag any request that would break one.
+4. Ship engineering; the owner owns product-source and vendor decisions called out as locked.
+5. Keep this file current: when decisions change, update it; when work completes, retire its entry to `docs/archive/AGENT_LOG.md`; promote any new durable gotcha into the ledger below. Never delete history silently.
+6. Before major architecture changes, update `docs/MACUPDATER-BREAKDOWN.md` (or successor arch doc) and record the decision here.
+
+Resume = open an agent in the **Local path** above and say "continue". Pull first — once a remote exists, it is the source of truth; local clones are mirrors.
+
+---
+
+## Docs map (in-repo)
+
+| Area | Files |
+|---|---|
+| **Ops / env** | Hardware/toolchain facts: this file §Verification gate + `docs/archive/AGENT_LOG.md` device section |
+| **Architecture / contracts** | `docs/MACUPDATER-BREAKDOWN.md` (§3 combined design; evidence-annotated) |
+| **Data / pipelines** | Source endpoints + schemas documented inside MACUPDATER-BREAKDOWN §1–2 |
+| **Policy** | Locked decisions above; security floor; CLAUDE.md protocol |
+| **History** | `docs/archive/` (superseded planning docs + **AGENT_LOG.md** = full work log) |
+| **Human status** | `README.md` |
+
+Point at files that exist. A missing doc is a gap to flag, not a file to invent mid-task.
+
+---
+
+## Verification gate
+
+The standing gate CLAUDE.md §6 requires. Copy-paste commands only. Keep this block in lockstep with reality.
+
+Project source exists? not yet (scaffold = first build phase). Current working gate once scaffolded:
+
+```
+swift build (SPM) or xcodebuild -project AppUpdater.xcodeproj -scheme AppUpdater build   # build green
+swiftlint (to be added to toolchain)                                                    # lint 0 warnings
+swift test                                                                              # test suite 0 fail
+codesign -v --strict AppUpdater.app                                                     # signature valid
+```
+
+- Gate commands are **intended**, not yet proven — source does not exist yet. First green build lands proof here.
+- A change is done when every line of this gate has evidence from this session. Anything skipped is **unverified**.
+
+---
+
+## Gotcha ledger (read before touching the matching area)
+
+*(Empty — nothing paid for in-repo yet. Entries land when code pain is paid for; format below.)*
+
+```
+- **{thing that bites}** — {the actual rule}. Symptom: {what it looked like}. Fix: {what works}. Evidence: `{path or PR}`.
+```
+
+---
+
+## Current open items
+
+- [ ] **Stack freeze confirmation** — proposed: Swift 6.4 / Xcode 27 (beta on this machine) project + SwiftPM; dependency: Sparkle 2 (self-update); deployment target macOS 15.0. Evidence: Xcode-beta 27.0 Build 27A5194q, swift-driver 1.167 (Apple Swift 6.4), macOS 27.2 — verified live. Remaining: owner sign-off.
+- [ ] **Apple Developer ID signing certificate** — only macOS identity currently in keychain is `Spike0 Signing` (dev-class, NOT Developer ID). Personal builds/signing OK for local use; **public notarized release requires Apple Developer Program membership**. Evidence: `security find-identity -v -p codesigning` (1 identity "Spike0 Signing"). Remaining: owner enrollment/assignment.
+- [ ] **Root helper phase timing** — recommended phase 2 (plain user-space installs cover most apps; PKG/hard cases need the daemon). Owner同意 pending.
+- [ ] **Canonical remote creation** — `gh auth status` ✓ logged in as `abyssbugg` (repo scope). Pending owner pick: `private` repo first (recommended) vs `public`. Local `git init` done at project start.
+- [ ] **v1 source set sign-off** — cask JSON index + app's own Sparkle appcast + MAS (iTunes lookup) + GitHub optional-flag; Electron/scrape deferred. Evidence: verified live samples in `docs/evidence/`.
+
+---
+
+## First response pattern when user continues
+
+1. Confirm the **Name**, the LOCKED decisions in one short pass, and the current phase.
+2. Point to open items and ship work — no product lectures.
+3. Proceed engineering; owner owns the decisions marked locked.
