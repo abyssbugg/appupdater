@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "AppUpdaterCore", targets: ["AppUpdaterCore"]),
         .executable(name: "AppUpdaterApp", targets: ["AppUpdaterApp"]),
+        .executable(name: "appupdater-cli", targets: ["appupdater-cli"]),
     ],
     targets: [
         // Engine: scanner, sources (cask/sparkle/MAS), version oracle, installer (later phases)
@@ -15,6 +16,11 @@ let package = Package(
         // Front shell: menu-bar item + normal window (both, per owner requirement)
         .executableTarget(
             name: "AppUpdaterApp",
+            dependencies: ["AppUpdaterCore"]
+        ),
+        // Scriptable surface: scan + live-check with honest JSON reports (Phase 2 gate instrument).
+        .executableTarget(
+            name: "appupdater-cli",
             dependencies: ["AppUpdaterCore"]
         ),
         .testTarget(name: "AppUpdaterCoreTests", dependencies: ["AppUpdaterCore"]),

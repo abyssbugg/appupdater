@@ -18,8 +18,8 @@ import Foundation
 ///   guarded by rough shape, never by proof: a plausible base64-ish signature ≥ 20 chars ⇒ `.high`,
 ///   otherwise `.medium` — never a claim that the artifact was cryptographically validated.
 /// - **SHA-256 is nil by definition here**: Sparkle authenticates via EdDSA, not sha256.
-/// - The version comparator used today is a temporary numeric-aware dot comparator
-///   (`SparkleVersionComparator`, see `AppcastParser.swift`); it is replaced by VersionOracle at merge.
+/// - Version selection uses the shared `VersionOracle` comparator (lane-merge swap;
+///   the temporary lane-local dot comparator was removed).
 public struct SparkleSource: UpdateSource {
     /// Fetch User-Agent mandated for this lane.
     public static let userAgent = "AppUpdater/0.1 (macOS)"
@@ -43,7 +43,7 @@ public struct SparkleSource: UpdateSource {
         guard let feedURLString = app.sparkleFeedURL else { return nil }
         let trimmedFeed = feedURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedFeed.isEmpty, let feedURL = URL(string: trimmedFeed) else { return nil }
-        // HTTPS-only per the project security floor (LOCKED decision 6); anything else is ignored.
+        // SECURITY FLOOR POLICY (LOCKED decision 6): HTTPS-only. Anything else is ignored.
         guard feedURL.scheme?.lowercased() == "https" else { return nil }
 
         var request = URLRequest(url: feedURL)

@@ -83,17 +83,22 @@ enum AppcastParser {
 
         let installed = installedBundleVersion?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let oracle = VersionOracle()
         let candidates = installed.isEmpty
             ? eligible
-            : eligible.filter { SparkleVersionComparator.isNewerVersion($0.sparkleVersion!, than: installed) }
+            : eligible.filter {
+                // Integation note: was SparkleVersionComparator (temporary lane-local
+                // comparator); swapped to the shared VersionOracle per merge plan.
+                oracle.compare($0.sparkleVersion!, installed) == .greater
+            }
         guard let first = candidates.first else { return nil }
 
         var winner = first
         for candidate in candidates.dropFirst() {
-            let comparison = SparkleVersionComparator.compare(candidate.sparkleVersion!, winner.sparkleVersion!)
-            if comparison > 0 {
+            let comparison = oracle.compare(candidate.sparkleVersion!, winner.sparkleVersion!)
+            if comparison == .greater {
                 winner = candidate
-            } else if comparison == 0,
+            } else if comparison == .equal,
                       (candidate.pubDate ?? .distantPast) > (winner.pubDate ?? .distantPast) {
                 winner = candidate
             }
@@ -418,59 +423,3 @@ private final class Collector: NSObject, XMLParserDelegate {
     }
 }
 
-// MARK: - Temporary version comparator
-
-// TODO(merge): replace with VersionOracle after lanes merge.
-//
-/// Minimal numeric-aware dot comparator — this lane's MUST-level minimum (e.g. "1.10" > "1.2").
-/// Known limitations (documented, intentionally not fixed here):
-/// - Dot segments that parse fully-numeric compare numerically; others compare lexically
-///   (case-insensitive).
-/// - A numeric segment beats a non-numeric one at the same position, Sparkle-style
-///   release-beats-prerelease ("1.2" > "1.2a4"); no deeper prerelease alphabet ordering.
-/// - Missing trailing segments pad as numeric 0, so "1.2" == "1.2.0".
-/// Mixed-format comparisons ("2200" vs "2.2.0") degrade gracefully but are NOT phase-accurate —
-/// that nuance is exactly what VersionOracle must own.
-enum SparkleVersionComparator {
-    static func isNewerVersion(_ candidate: String, than installed: String) -> Bool {
-        compare(candidate, installed) > 0
-    }
-
-    /// -1, 0, or +1 comparison of two version strings.
-    static func compare(_ lhs: String, _ rhs: String) -> Int {
-        let left = segments(lhs), right = segments(rhs)
-        let count = max(left.count, right.count)
-        for index in 0..<count {
-            let l = index < left.count ? left[index] : Segment.numeric(0)
-            let r = index < right.count ? right[index] : Segment.numeric(0)
-            switch (l, r) {
-            case let (.numeric(a), .numeric(b)):
-                if a < b { return -1 }
-                if a > b { return 1 }
-            case let (.text(a), .text(b)):
-                let ordering = a.compare(b, options: .caseInsensitive)
-                if ordering == .orderedAscending { return -1 }
-                if ordering == .orderedDescending { return 1 }
-            case (.numeric, .text):
-                return 1   // numeric position beats prerelease-style text
-            case (.text, .numeric):
-                return -1
-            }
-        }
-        return 0
-    }
-
-    private enum Segment: Equatable {
-        case numeric(Int)
-        case text(String)
-    }
-
-    private static func segments(_ version: String) -> [Segment] {
-        version
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(separator: ".").map { piece -> Segment in
-                let plain = String(piece)
-                return Int(plain).map(Segment.numeric) ?? .text(plain)
-            }
-    }
-}

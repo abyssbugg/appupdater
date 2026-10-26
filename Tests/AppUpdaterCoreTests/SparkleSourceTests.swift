@@ -278,14 +278,17 @@ struct SparkleSourceTests {
     }
 
     @Test
-    func comparatorIsNumericAwareNotLexical() {
-        #expect(SparkleVersionComparator.compare("1.10", "1.2") > 0)   // the MUST case
-        #expect(SparkleVersionComparator.compare("1.2", "1.10") < 0)
-        #expect(SparkleVersionComparator.compare("1.2", "1.2") == 0)   // equal strings equal
-        #expect(SparkleVersionComparator.compare("1.2", "1.2.0") == 0) // zero-padding tolerance
-        #expect(SparkleVersionComparator.compare("2.0.0", "1.2") > 0)
-        #expect(SparkleVersionComparator.compare("1.2.3", "1.2.10") < 0)
-        #expect(SparkleVersionComparator.isNewerVersion("1.10.0", than: "1.2.3"))
-        #expect(!SparkleVersionComparator.isNewerVersion("1.9.0", than: "9.8"))
+    func selectionUsesVersionOracleComparator() {
+        // Integration: the lane-local temporary comparator was replaced by VersionOracle.
+        // The pinned MUST cases from the lane review now run against the real comparator.
+        let oracle = VersionOracle()
+        #expect(oracle.compare("1.10", "1.2") == .greater)   // numeric-aware, not lexical
+        #expect(oracle.compare("1.2", "1.10") == .less)
+        #expect(oracle.compare("1.2", "1.2") == .equal)      // equal strings equal
+        #expect(oracle.compare("1.2", "1.2.0") == .equal)    // zero-padding tolerance
+        #expect(oracle.compare("2.0.0", "1.2") == .greater)
+        #expect(oracle.compare("1.2.3", "1.2.10") == .less)
+        #expect(oracle.isUpdateAvailable(installed: "1.2.3", available: "1.10.0"))
+        #expect(!oracle.isUpdateAvailable(installed: "9.8", available: "1.9.0"))
     }
 }

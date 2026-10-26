@@ -5,6 +5,19 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-26 — Phase 2 (Scanner + SourceStrategy) COMPLETE — engine + CLI gate green
+
+**Confirmed (live evidence, this session):**
+1. Five parallel lanes built in isolated worktrees and merged sequentially (`lane/version→scanner→cask→sparkle→mas`, commits `408412d…416f75b`); each lane gate-verified in its own worktree, then a union gate: version 36 + scanner 12 + cask 10 + sparkle 9 + mas 6 + scaffold 2 = 69…77 baseline, final full-suite **82 tests / 7 suites** after integration tests & fixes.
+2. **Comparator swap at integration** (planned seam): removed SparkleSource's temporary lane-local comparator; selection now goes through `VersionOracle` (Lane E). Sparkle lane's pinned comparator cases re-run against the real comparator in `SparkleSourceTests.selectionUsesVersionOracleComparator`.
+3. **Integration layer built:** `UpdateCheckEngine` (precedence-ordered sources, honest per-source failure capture, resolve via VersionOracle, deterministic input order) + `appupdater-cli` (`scan` = inventory no-network; `check` = live lookups cask→sparkle→mas with machine-readable verdicts. `UpdateCheck.verdict` made an encoded field after the live run showed JSON silently dropping the computed property.
+4. **Live /Applications gate:** scan = 82 apps honest inventory (`docs/evidence/phase2-scan.json`); check run (`docs/evidence/phase2-check.json`): Ghostty = update (cask 1.3.1 beats unparseable locally-built version string), MacUpdater = current (cask 3.5.0 == installed, no inflated claim), AdGuard = unknown (cask installs via `.pkg`, no app artifact — match declined honestly; its feed is also a non-default channel), Chrome = unknown (name→token `chrome` 404; real alias `google-chrome` needs later-phase alias tables). Zero false "update" claims across the run.
+5. Integration test fixes during this phase (all root-caused): `artifacts` shape used object-directive form `[{"app":...}]`; `sparkle:edSignature` is an enclosure ATTRIBUTE in Sparkle feeds (element form parsed as absent); Swift 6.4 struct deinit not allowed → recycled per-run temp dir; `URL!` IUO member poisons parameter sites; static access from instance methods must be `Self.`-qualified.
+
+**Phase 2 status: DONE and verified.** Next: Phase 3 installer (dry-run/apply split, atomic swap, backups) per BUILD-PLAN.
+
+---
+
 ## 2026-10-26 — Phase 1 (Scaffold) COMPLETE — full gate green
 
 **Where:** `~/dev/appupdater`, branch `main`.

@@ -104,15 +104,17 @@ Point at files that exist. A missing doc is a gap to flag, not a file to invent 
 
 ## Verification gate
 
-The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from this session (2026-10-26, Phase 1 close).**
+The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-26, Phase 2 close).**
 
 ```
-swift build                                    # PROVEN exit=0
-swift test                                     # PROVEN exit=0 — 2 tests / 1 suite (Swift Testing)
-Scripts/make-app.sh release                    # PROVEN prints "Assembled: build/AppUpdater.app"
-codesign -v --strict build/AppUpdater.app      # PROVEN OK (adhoc signature)
+swift build                                    # PROVEN exit=0 (Phase 2 integration)
+swift test                                     # PROVEN 82 tests / 7 suites, exit=0
+Scripts/make-app.sh release                    # PROVEN "Assembled: build/AppUpdater.app"
+codesign -v --strict build/AppUpdater.app      # PROVEN OK (adhoc)
 plutil -lint build/AppUpdater.app/Contents/Info.plist   # PROVEN OK
-launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN pid created, zero crash reports in ~/Library/Logs/DiagnosticReports, clean quit
+launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN cleanup path ran, zero crash reports, clean quit
+swift run appupdater-cli scan                  # PROVEN 82 apps inventoried from real /Applications (docs/evidence/phase2-scan.json)
+swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROVEN honest verdicts incl. update/current/unknown mix (docs/evidence/phase2-check.json)
 ```
 
 - swiftlint is still NOT installed (`brew install swiftlint` pending) — that gate line stays unverified and is treated as debt, not skipped silently.
@@ -136,6 +138,9 @@ launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN pid crea
 
 ## Current open items
 
+- [x] **Phase 2 (Scanner + SourceStrategy) — DONE** 2026-10-26: 5 parallel lanes merged (`lane/version/scanner/cask/sparkle/mas`), comparator swap to VersionOracle complete, `UpdateCheckEngine` + `appupdater-cli` built, 82 tests / 7 suites green, live `/Applications` gate runs evidenced under `docs/evidence/phase2-*.json`.
+- [ ] **Cask alias table (token mapping)** — name-derived token missed `chrome`→`google-chrome` (honest unknown in the evidence run). MacUpdater-style token/bundle-id alias map is the correct later-phase work; whole-index fetch deferred per Lane B decision.
+- [ ] **Non-default Sparkle channels (beta/nightly)** — currently only the default channel is honored (AdGuard nightly correctly shows unknown). Opt-in UI for channel policy comes with the Phase 4 UI work.
 - [x] **Stack freeze** — Swift 6.4 / Xcode 27 / SwiftPM / Sparkle 2 / SwiftUI+AppKit shell / deployment target **macOS 15.0**. Owner sign-off 2026-10-26 (LOCKED decision 8).
 - [x] **Canonical remote** — `abyssbugg/appupdater` private repo created + pushed 2026-10-26 (LOCKED table above).
 - [x] **v1 source set** — cask JSON index + app's own Sparkle appcast + MAS (iTunes lookup) + GitHub optional-flag; Electron/scrape deferred. Evidence: live samples in `docs/evidence/`.

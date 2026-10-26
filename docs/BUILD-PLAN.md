@@ -19,20 +19,17 @@ Gate: `swift build` green · `.app` bundle assembles · launches without crash l
 - App shell lives early but displays a stub list — no fake behavior (Honest boundary).
 - CI runbook locally documented (Actions added in Phase 6).
 
-## Phase 2 — Scanner + SourceStrategy (truth engine)
-Gate: scan your `/Applications` → JSON report of updates found, 0 false "success" claims
-Lanes (parallel):
-- **A. Scanner/AppInfo** — enumerate apps (+ custom folders later), Info.plist fixups
-  (bundle-id, version), codesign date (SecStaticCode), MAS receipt detection.
-- **B. CaskSource** — download `formulae.brew.sh/api/cask.json` (full index), map artifacts
-  ↔ installed apps, extract `version/sha256/url/quit`.
-- **C. SparkleSource** — fetch app's own `SUFeedURL` appcast (UA handling like guidance),
-  parse items: version/shortVersion/minimumSystemVersion/edSignature/enclosure/rollout/critical.
-- **D. MASSource** — iTunes lookup by bundle id + receipt cross-check (inform + replace-MAS
-  decision matrix).
-- **E. VersionOracle** — Sparkle-style comparator + special cases (Apple builds, dates, suffixes).
-Reconciliation order (owner-locked sources v1): cask > sparkle > MAS > GitHub(optional) —
-documented in code as precedence with confidence labels like Updatest.
+## Phase 2 — Scanner + SourceStrategy (truth engine) — ✅ DONE 2026-10-26
+Gate (met): scan your `/Applications` → JSON report of updates found, 0 false "success" claims.
+Evidence: `docs/evidence/phase2-scan.json` (82 apps) + `docs/evidence/phase2-check.json` (verdict mix update/current/unknown, no fakes); full suite **82 tests / 7 suites green** at merge.
+Lanes (parallel, DONE):
+- ✅ **A. Scanner/AppInfo** — `Sources/AppUpdaterCore/Scan/` (enumeration, Info.plist fixups, MAS receipt detection, SUFeedURL capture)
+- ✅ **B. CaskSource** — `Sources/AppUpdaterCore/UpdateSources/Cask/` (single-cask fetch + tolerant decode + honest artifact validation)
+- ✅ **C. SparkleSource** — `Sources/AppUpdaterCore/UpdateSources/Sparkle/` (appcast parse, default-channel policy, EdDSA-shape confidence)
+- ✅ **D. MASSource** — `Sources/AppUpdaterCore/UpdateSources/MAS/` (iTunes lookup, MAS-only guard, country=us)
+- ✅ **E. VersionOracle** — `Sources/AppUpdaterCore/Versioning/` (Sparkle-style comparator + locked precedence resolver)
+- ✅ **Integration** — `Sources/AppUpdaterCore/Engine/UpdateCheckEngine.swift` + `Sources/appupdater-cli/` + `Tests/AppUpdaterCoreTests/IntegrationTests.swift`
+Deferred (tracked in AGENTS.md open items): cask token alias table (chrome→google-chrome), non-default Sparkle channels opt-in.
 
 ## Phase 3 — Installer (plain user-space, atomic swap)
 Gate: dry-run mode executes a REAL low-risk update end-to-end on the dev machine; backup verified
