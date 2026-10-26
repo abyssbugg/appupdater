@@ -32,8 +32,10 @@ import Foundation
 ///   belongs to the scan-engine layer above this primitive.
 /// - **Field mapping sources**: `CFBundleIdentifier` (fallback: bundle folder name without
 ///   `.app`), `CFBundleName` (fallback: `CFBundleDisplayName`, then folder name), `path` (POSIX
-///   string), `CFBundleShortVersionString`, `CFBundleVersion`, `LSMinimumSystemVersion`, and
-///   `SUFeedURL` taken as-is when present. Version-like values tolerate numeric plist values.
+///   string), `CFBundleShortVersionString`, `CFBundleVersion`, `LSMinimumSystemVersion`,
+///   `SUDefaultChannel` taken verbatim when present (Sparkle channel policy; nil when absent or
+///   empty), and `SUFeedURL` taken as-is when present. Version-like values tolerate numeric plist
+///   values.
 /// - **isMacAppStore** is true only when `Contents/_MASReceipt/_MASReceipt` exists.
 /// - `signatureTeamID` and `checkedAt` are left nil here (codesign and result-stamping are
 ///   other lanes' responsibilities).
@@ -77,6 +79,17 @@ public struct ProductionAppScanner: AppScanner {
         let posixPath = posixPath(of: bundleURL)
 
         let sparkleFeed = plist["SUFeedURL"] as? String   // strict String, kept as-is
+
+        // Sparkle channel policy: taken verbatim when present; an empty string counts as unset
+        // (nil), matching the documented field-mapping rule above. No trimming — the declaration
+        // is the app's own policy, not a normalized value.
+        let suDefaultChannel: String?
+        if let declared = plist["SUDefaultChannel"] as? String, !declared.isEmpty {
+            suDefaultChannel = declared
+        } else {
+            suDefaultChannel = nil
+        }
+
         var isDirectory: ObjCBool = false
         let receiptURL = bundleURL
             .appendingPathComponent("Contents")
@@ -96,7 +109,8 @@ public struct ProductionAppScanner: AppScanner {
             bundleVersion: InfoProbe.string(for: ["CFBundleVersion"], in: plist),
             minimumSystemVersion: InfoProbe.string(for: ["LSMinimumSystemVersion"], in: plist),
             isMacAppStore: hasReceipt,
-            sparkleFeedURL: sparkleFeed
+            sparkleFeedURL: sparkleFeed,
+            suDefaultChannel: suDefaultChannel
         )
     }
 

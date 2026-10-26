@@ -13,6 +13,12 @@ public struct InstalledApp: Codable, Hashable, Sendable, Identifiable {
     public var isMacAppStore: Bool
     /// Hint read from the app's own Info.plist `SUFeedURL` if present at scan time.
     public var sparkleFeedURL: String?
+    /// Sparkle's own SUDefaultChannel Info.plist key, captured verbatim by the scanner;
+    /// nil = the app declares no custom channel (or pre-addition JSON decode).
+    /// AMENDMENT RECORD: coordinator-owned interchange type, additive field lane channels
+    /// 2026-10-26; previously-written encoded UpdateCheck/rules JSON WITHOUT this key must keep
+    /// decoding (proved by the old-fixture decode test in ScannerTests).
+    public var suDefaultChannel: String? = nil
     public var checkedAt: Date?
 
     public var id: String { bundleIdentifier + "|" + path }
@@ -27,6 +33,7 @@ public struct InstalledApp: Codable, Hashable, Sendable, Identifiable {
         signatureTeamID: String? = nil,
         isMacAppStore: Bool = false,
         sparkleFeedURL: String? = nil,
+        suDefaultChannel: String? = nil,
         checkedAt: Date? = nil
     ) {
         self.bundleIdentifier = bundleIdentifier
@@ -38,6 +45,7 @@ public struct InstalledApp: Codable, Hashable, Sendable, Identifiable {
         self.signatureTeamID = signatureTeamID
         self.isMacAppStore = isMacAppStore
         self.sparkleFeedURL = sparkleFeedURL
+        self.suDefaultChannel = suDefaultChannel
         self.checkedAt = checkedAt
     }
 }

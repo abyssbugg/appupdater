@@ -21,6 +21,7 @@ struct SparkleSourceTests {
         static let main = "/v1/main.xml"
         static let fallback = "/v1/fallback.xml"
         static let older = "/v1/older.xml"
+        static let channels = "/v1/channels.xml"
     }
 
     private static let mainAppcastXML = #"""
@@ -94,10 +95,38 @@ struct SparkleSourceTests {
     </rss>
     """#
 
+    /// One default (channel-less) item plus three channel-tagged items (beta/delta/nightly),
+    /// each newer than the previous — so any accidental channel admission surfaces as a win.
+    private static let channelsAppcastXML = #"""
+    <?xml version="1.0" standalone="yes"?>
+    <rss xmlns:sparkle="http://www.sparkle-project.org/xml/sparkle/2008" version="2.0">
+      <channel>
+        <title>ChannelApp Updates</title>
+        <item>
+          <title>Version 1.0</title>
+          <enclosure url="https://example.com/files/Channel-1.0.zip" sparkle:version="1.0.0" type="application/octet-stream" length="1000000"/>
+        </item>
+        <item>
+          <title>Version 2.0 beta</title>
+          <enclosure url="https://example.com/files/Channel-2.0b.zip" sparkle:version="2.0.0" sparkle:channel="beta" type="application/octet-stream" length="2000000"/>
+        </item>
+        <item>
+          <title>Version 3.0 delta</title>
+          <enclosure url="https://example.com/files/Channel-3.0d.zip" sparkle:version="3.0.0" sparkle:channel="delta" type="application/octet-stream" length="3000000"/>
+        </item>
+        <item>
+          <title>Version 4.0 nightly</title>
+          <enclosure url="https://example.com/files/Channel-4.0n.zip" sparkle:version="4.0.0" sparkle:channel="nightly" type="application/octet-stream" length="4000000"/>
+        </item>
+      </channel>
+    </rss>
+    """#
+
     private static let routes: [String: (status: Int, body: String)] = [
         RoutePath.main: (200, mainAppcastXML),
         RoutePath.fallback: (200, fallbackAppcastXML),
         RoutePath.older: (200, olderAppcastXML),
+        RoutePath.channels: (200, channelsAppcastXML),
     ]
 
     // MARK: - Hermetic transport
@@ -150,14 +179,16 @@ struct SparkleSourceTests {
 
     private func makeApp(
         path: String,
-        bundleVersion: String? = nil
+        bundleVersion: String? = nil,
+        suDefaultChannel: String? = nil
     ) -> InstalledApp {
         InstalledApp(
             bundleIdentifier: "com.example.app",
             name: "Example App",
             path: "/Applications/Example.app",
             bundleVersion: bundleVersion,
-            sparkleFeedURL: "https://appcast.stub.invalid" + path
+            sparkleFeedURL: "https://appcast.stub.invalid" + path,
+            suDefaultChannel: suDefaultChannel
         )
     }
 
@@ -290,5 +321,92 @@ struct SparkleSourceTests {
         #expect(oracle.compare("1.2.3", "1.2.10") == .less)
         #expect(oracle.isUpdateAvailable(installed: "1.2.3", available: "1.10.0"))
         #expect(!oracle.isUpdateAvailable(installed: "9.8", available: "1.9.0"))
+    }
+
+    // MARK: - Declared channel policy (lane channels)
+
+    @Test
+    func noDeclaredChannelKeepsUnchangedDefaultChannelOnlyBehavior() async throws {
+        let source = makeSource()
+
+        // Baseline (unchanged by construction): with no declared channel the default item is the
+        // ONLY admissible one and wins even though newer channel-tagged items exist in the feed.
+        let info = try await source.fetchUpdateInfo(
+            for: makeApp(path: RoutePath.channels, bundleVersion: "0.9.0"))
+        let update = try #require(info)
+        #expect(update.newestBundleVersion == "1.0.0")
+        #expect(update.downloadURL?.absoluteString == "https://example.com/files/Channel-1.0.zip")
+        #expect(update.sourceDetail?.contains("channel: default") == true)
+
+        // Exclusion probe: installed 2.5.0 — the tagged items (2.0 beta, 3.0 delta, 4.0 nightly)
+        // are all NEWER than the installed version. If any of them were admissible it would
+        // emerge here; correct behavior is nil (the only admissible item, 1.0.0, is not newer).
+        let admissibleProbe = try await source.fetchUpdateInfo(
+            for: makeApp(path: RoutePath.channels, bundleVersion: "2.5.0"))
+        #expect(admissibleProbe == nil)
+    }
+
+    @Test
+    func declaredChannelAdmitsMatchingChannelAlongsideDefault() async throws {
+        let source = makeSource()
+
+        // App declares "delta": the delta item (3.0.0) is admissible and wins over the older
+        // default item; beta (2.0.0, same-version-range as installed) and nightly (4.0.0, which
+        // would otherwise be the winner) stay excluded.
+        let info = try await source.fetchUpdateInfo(
+            for: makeApp(
+                path: RoutePath.channels,
+                bundleVersion: "2.5.0",
+                suDefaultChannel: "delta"
+            ))
+        let update = try #require(info)
+        #expect(update.newestBundleVersion == "3.0.0")
+        #expect(update.downloadURL?.absoluteString == "https://example.com/files/Channel-3.0d.zip")
+        // The winner reports its TRUE channel, not the selection-internal re-tagged default.
+        #expect(update.sourceDetail?.contains("channel: delta") == true)
+        #expect(update.sourceDetail?.contains("channel: nightly") == false)
+    }
+
+    @Test
+    func declaredChannelMatchIsExactCaseSensitiveLikeSparkle() throws {
+        // Sparkle's own filtering admits an item when its channel is IN the allowed set
+        // (`SUAppcastDriver.filterAppcast:forMacOSAndAllowedChannels:` → `NSSet containsObject:`,
+        // case-sensitive NSString equality) and always keeps channel-less items. Pin our exact
+        // mirror: a case-mismatched declaration must NOT admit the item ("Delta" ≠ "delta").
+        let defaultItem = SparkleAppcastItem(
+            sparkleVersion: "1.0.0", shortVersionString: "1.0", enclosureURL: nil,
+            edSignature: nil, criticalUpdate: false, minimumSystemVersion: nil, channel: nil,
+            pubDate: nil, releaseNotes: nil)
+        let betaItem = SparkleAppcastItem(
+            sparkleVersion: "2.0.0", shortVersionString: "2.0", enclosureURL: nil,
+            edSignature: nil, criticalUpdate: false, minimumSystemVersion: nil, channel: "beta",
+            pubDate: nil, releaseNotes: nil)
+        let deltaItem = SparkleAppcastItem(
+            sparkleVersion: "3.0.0", shortVersionString: "3.0", enclosureURL: nil,
+            edSignature: nil, criticalUpdate: false, minimumSystemVersion: nil, channel: "delta",
+            pubDate: nil, releaseNotes: nil)
+        let nightlyItem = SparkleAppcastItem(
+            sparkleVersion: "4.0.0", shortVersionString: "4.0", enclosureURL: nil,
+            edSignature: nil, criticalUpdate: false, minimumSystemVersion: nil, channel: "nightly",
+            pubDate: nil, releaseNotes: nil)
+        let items = [defaultItem, betaItem, deltaItem, nightlyItem]
+
+        // EXACT match: only the exactly-declared channel joins the default channel.
+        let exact = try #require(SparkleSource.selectAdmissible(
+            items, declaredChannel: "delta", installedBundleVersion: nil))
+        #expect(exact.sparkleVersion == "3.0.0")       // delta admitted (would-be nightly winner excluded)
+        #expect(exact.channel == "delta")              // true channel restored after selection
+
+        // Case-mismatched declaration: "Delta" ≠ "delta" ⇒ the delta item stays excluded and the
+        // default-item-only policy remains (documented Sparkle-semantics EXACT-match rule).
+        let mismatched = try #require(SparkleSource.selectAdmissible(
+            items, declaredChannel: "Delta", installedBundleVersion: nil))
+        #expect(mismatched.sparkleVersion == "1.0.0")
+        #expect(mismatched.channel == nil)
+
+        // Empty declaration is defensively equivalent to none: unchanged default-channel behavior.
+        let empty = try #require(SparkleSource.selectAdmissible(
+            items, declaredChannel: "", installedBundleVersion: nil))
+        #expect(empty.sparkleVersion == "1.0.0")
     }
 }
