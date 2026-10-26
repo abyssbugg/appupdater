@@ -1,28 +1,87 @@
 import SwiftUI
-import Combine
+import AppKit
+import AppUpdaterCore
 
 struct MenuBarView: View {
     let showMainWindow: () -> Void
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
-        VStack {
-            Button("Open AppUpdater") { showMainWindow() }
-            Divider()
-            Button("Scan Now") { appState.scanNow() }
-            Divider()
-            Text(statusLine).foregroundStyle(.secondary)
-            Divider()
-            Button("Quit AppUpdater") { NSApplication.shared.terminate(nil) }
+        let menu = appState.menuData
+        VStack(alignment: .leading, spacing: 2) {
+            // headline block — contract order: Check / Open / Quit.
+            ForEach(menu.headline, id: \.id.stableID) { action in
+                Button {
+                    handle(action.id)
+                } label: {
+                    Text(action.label)
+                }
+            }
+
+            Divider().padding(.vertical, 3)
+
+            // pending surface — MenuData's own honesty: only rows the rules
+            // let through; MAS rows carry the Store note instead of an
+            // install affordance.
+            if menu.pendingSection.updates.isEmpty {
+                Text("No pending updates")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(menu.pendingSection.updates) { row in
+                    ForEach(MenuData.actions(for: row), id: \.id.stableID) { action in
+                        Button {
+                            handle(action.id)
+                        } label: {
+                            Text(action.label)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                }
+                Text("Install Now stages the owner-run CLI command (⌘ copies); the app never applies it itself.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider().padding(.vertical, 3)
+
+            // the coordinator-owned `.currentApps` count + schedule lines
+            Text("\(appState.upToDateCount) apps up to date")
+                .font(.caption)
+            ForEach(menu.scheduleSection, id: \.self) { line in
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider().padding(.vertical, 3)
+            Text("\(menu.counts.total) apps inventoried")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+        .padding(6)
+        .frame(minWidth: 290)
     }
 
-    private var statusLine: String {
-        switch appState.phase {
-        case .idle: "Engine phase 2 pending — scanner not wired yet."
-        case .scanning: "Scanning…"
-        case .loaded(let n): "\(n) apps"
-        case .failed(let m): "Failed: \(m)"
+    /// The coordinator's MenuAction → handler binding (MenuData's doc
+    /// contract: the data layer supplies Sections+IDs; the app shell maps
+    /// IDs to real handlers exactly once, here).
+    private func handle(_ id: MenuAction.ID) {
+        switch id {
+        case .checkNow:
+            Task { await appState.list.refresh() }
+        case .openMainWindow:
+            showMainWindow()
+        case .openSettings:
+            // v1: the settings/schedule pane lives in the window as a sheet.
+            showMainWindow()
+        case .quit:
+            NSApplication.shared.terminate(nil)
+        case .installNow(let bundleID):
+            appState.requestInstall(bundleID: bundleID)
+        case .viewDetails(let bundleID):
+            appState.showDetails(bundleID: bundleID)
+            showMainWindow()
         }
     }
 }

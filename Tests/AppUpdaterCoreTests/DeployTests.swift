@@ -10,19 +10,25 @@ import Testing
 
 @Suite(.serialized)
 struct DeployTests {
-    /// Deterministic root wiped at each init (Integration-suite pattern keeps startup
+    /// Root wiped at each init (Integration-suite pattern keeps startup
     /// fast); every test additionally gets its own UUID subdirectory so parallel
     /// leftovers from a crashed run can't pollute assertions. Mount dirs are cleaned
     /// by the code under test; product detaches on every path.
-    private var root: URL = URL(fileURLWithPath: "/tmp/appupdater-lanedeploy")
+    ///
+    /// The NAME is unique per PROCESS (static = computed once, not per test):
+    /// concurrent `swift test` runners each own their directory, so one
+    /// runner's init wipe can never delete another runner's live fixtures —
+    /// fixed shared roots used to do exactly that (the Phase-4 cross-process
+    /// flake; see AGENTS.md gotcha ledger).
+    private var root: URL = Self.sharedRoot
+    private static let sharedRoot: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("appupdater-lanedeploy-\(UUID().uuidString)", isDirectory: true)
     private let fm = FileManager.default
 
     init() {
-        let restored = fm.temporaryDirectory
-            .appendingPathComponent("appupdater-lanedeploy", isDirectory: true)
-        try? fm.removeItem(at: restored)
-        try? fm.createDirectory(at: restored, withIntermediateDirectories: true)
-        root = restored
+        try? fm.removeItem(at: Self.sharedRoot)
+        try? fm.createDirectory(at: Self.sharedRoot, withIntermediateDirectories: true)
+        root = Self.sharedRoot
     }
 
     // MARK: - Fixtures (real bytes, real bundles)

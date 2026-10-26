@@ -44,13 +44,71 @@ mounts) — applying to real third-party apps stays an explicit owner CLI action
 - ✅ **J. Coordinator** (`Installer/InstallPlanner.swift` pure + `Installer/InstallCoordinator.swift` + `Tests/InstallCoordinatorTests.swift`): receipts per ATTEMPTED step, abort-at-first-failure, INDEPENDENT sha256 re-verify (defense in depth), old-copy Trash disposition (injectable; default trashItem), per-apply staging workspace hygiene, postScan = direct Info.plist read; CLI `install` (dry-run plans + `--apply` real executor wiring; target discipline: exactly one --apps match; refusal exits touch nothing).
 Evidence (this session): • merged main = `79f8f8a`/`146299f`/`a10cc38`/`8207142` + lane commits `8813768`/`35b3f5f`/`6eeb8e7`/`e8bfde4` • `swift test` 137 tests / 13 suites exit 0 (incl. real-disk zip+dmg apply with dmg-mount leak assert) • live /Applications runs: `docs/evidence/phase3-scan.json` (82 apps), `phase3-check.json` (Ghostty=update, MacUpdater=current, AdGuard/Chrome=unknown), `phase3-installplan.json` (Ghostty → real 9-step dmg plan) • honest refusals: `--apply` zero-match → exit 2; current-verdict → exit 3; `~/Library/Application Support/AppUpdater` verified ABSENT after both (refusals create nothing) • bundle/sign/launch gate green.
 
-## Phase 4 — Scheduler + UI surface (OPENED 2026-10-26)
-Gate: scheduled scan triggers on timer + missed-scan catch-up; list/filter/ignore; auto-update rules
-- Idle/energy-aware scheduling; per-app/per-version ignore; menu-bar + window live data;
-  notifications; distributed notification for scriptability (custom names documented).
-- Lane split (4 parallel worktree lanes per protocol §5): L1 scheduler engine (Timer/catch-up seams),
-  L2 ignore-rules + list store, L3 menu-bar live data wiring, L4 window list UI. Shared models are
-  coordinator-owned: `Model/ScheduleStore.swift` frozen contract BEFORE lanes dispatch.
+## Phase 4 — Scheduler + UI surface — ✅ DONE (2026-10-26, gates proven; notifications remain an explicit in-phase OPEN item, never claimed)
+Gate status: scheduled fires + missed-scan catch-up + per-app auto-check rules + BOTH UI surfaces
+(menu-bar + window) live on the real machine. LOCKED boundaries restated in code: auto rules govern
+CHECKS + NOTIFICATIONS ONLY — auto-apply is never released; "Install Now" stages the exact owner-run
+CLI command (pasteboard + verbatim text) and the app itself executes nothing. Real `install --apply`
+stays the per-app owner CLI action (consent boundary, unchanged from Phase 3).
+- ✅ **Frozen interchange types** — `Model/ScheduleStore.swift` (coordinator-owned, committed BEFORE
+  lanes dispatched): SchedulePolicy (interval / skipOnBattery / onWakeCatchUp, floor+off clamped by
+  `RuleStore.clamped`) / ScheduleState (lastFireAt, appsChecked, wasCatchUp, error) / ScheduleSnapshot /
+  AppRow / IgnoreRule / RuleKind / RuleDecision.
+- ✅ **L1 scheduler engine** (`Schedule/ScheduleEngine.swift`, lane `1755a5c`, merge `57110a0`):
+  framework-pure loop (no AppKit, no persistence — a TRIGGER, not a store/filter), injected clock +
+  on-wake seam, battery skip via IOKit (suppresses catch-up, never corrupts the grid), catch-up fires
+  exactly once per missed persisted slot, policy captured once per stream (change ⇒ restart).
+  **Live-evidence fix at reconciliation:** a FIRST-EVER fire (persisted `lastFireAt == nil`, nothing
+  missed) now fires IMMEDIATELY as a NORMAL fire (`lastFireWasCatchUp = false`) instead of wearing a
+  phantom "wake catch-up" label the app had printed after a fresh launch.
+- ✅ **L2 rules store** (`Schedule/RuleStore.swift`, lane `d92567f`, merge `9c48fcc`):
+  ignoreBundle / ignoreVersion / setAutoCheck with honest persistence (read-only env never creates
+  anything; missing → absent truth; garbage → defaults + documented log line; next save replaces it;
+  atomic staging writes; JSONEngine `.prettyPrinted`/`.sortedKeys` round-trip).
+- ✅ **L3 menu-bar data** (`UI/MenuData.swift`, lane `87599b3`, merge `ebd97b6`): PURE transform
+  (rows, snapshot, now) → headline / pending / schedule sections + counts, deterministic (same inputs
+  ⇒ equal data). Refuses to guess the "up to date" classification — coordinator-owned answer: only
+  `verdict == "current"` rows count (rule-muted claims excluded).
+- ✅ **L4 window list VM** (`UI/ListViewModel.swift`, lane `2bf27de`, merge `80b700b`): `@Observable`
+  state machine (Observation-only, no SwiftUI), single pipeline order (query → filter → sort), stats,
+  selection. **Merge-time promotion (recorded):** the seam-injected init went `internal` → `public`
+  because the app shell lives OUTSIDE core (no `@testable`) and the class doc's own MERGE REQUIREMENT
+  names exactly this wiring from outside.
+- ✅ **Coordinator wiring at merge:** `Schedule/ScheduleFileStore.swift` + 6 tests — schedule.json
+  persistence EXISTS now (lane 2 deliberately left it unbuilt; coordinator picked it up, mirroring
+  RuleStore's honesty contract verbatim; payload = the frozen `ScheduleSnapshot`, load re-clamps); 
+  `AppState.swift` orchestrator (engine stream lifecycle persisting every snapshot, honest count
+  semantics: `ids == nil` fire = scan-only inventory refresh, ZERO source lookups, returns inventory
+  count; with ids = targeted checks returning the targeted count; manual Check Now refreshes the list
+  but NEVER touches ScheduleState — scheduled fires only); `SeamRouter` nested bridge documented as the
+  workaround for this toolchain's rule that init-scoped closures cannot capture even a weak
+  partially-initialized `self`; `MenuBarView` / `MainWindowView` (search/sort/filter/selection,
+  detail pane with rules incl. autoCheck toggle + Remove All Rules + CLI-command staging, honest
+  error banner — no alert API) / `ScheduleSettingsView` (interval picker Off/15/30/60/120/240/480 +
+  toggles, nearest-snap draft loading, Apply clamps → persists → restarts the stream); dynamic
+  menu-bar title shows the pending count ONLY when nonzero.
+- ✅ **Cross-process fixture flake root-caused + FIXED** (reconciliation): suites wiping a FIXED
+  shared temp root in `init()` erased a CONCURRENT `swift test` runner's fixtures mid-flight
+  (observed during 4-lane fan-out: `hdiutil attach failed`, `bundle.zip: No such file`). All four
+  sites (`DeployTests`, `InstallCoordinatorTests`, `IntegrationTests`, `RuleStoreTests`) now use a
+  per-PROCESS unique root (static UUID name, per-test wipe kept); `DownloadTests` verified safe.
+  Proof: `swift test` ×3 back-to-back green AND two CONCURRENT full runs both green, 0 failures.
+- ✅ **Evidence (this session):** lane + merge commits above onto local main • `swift test` 196 tests /
+  18 suites exit 0 (190 previous + 6 `ScheduleFileStoreTests`; run ×4 total incl. the definitive
+  close-out run, + 2 concurrent green) • live /Applications runs: `docs/evidence/phase4-scan.json`
+  (82 apps), `phase4-check.json` (Ghostty=update 1.3.1, MacUpdater=current, AdGuard/Chrome=unknown —
+  verdict honesty unchanged), `phase4-installplan.json` (Ghostty → real 9-step dmg plan,
+  `applied: false`) • refusals re-proven: `--apps DoesNotExist123 --apply` → exit 2, `--apps
+  MacUpdater --apply` → exit 3 (verdict `current`, no newer claim), `~/Library/Application
+  Support/AppUpdater` unchanged by both (`phase4-refuse-*.json`) • bundle/sign/launch gate green
+  (make-app release, codesign strict OK, plutil OK) • LIVE APP: fresh launch with schedule.json
+  deleted → first-ever fire recorded `lastFireWasCatchUp: false`, `lastFireAt` set, appsChecked=82,
+  no error, app scanned the REAL /Applications (82 apps) autonomously; clean quit; 0 crash reports.
+- ⬜ **OPEN within this phase (honest, not claimed done):** local notifications and the
+  distributed-notification surface for scriptability are NOT implemented (no scheduler-triggered
+  banner exists; the distributed custom-name feature likewise). These were scheduled inside Phase 4
+  but remain undone now that the engine/UI gates are green — they carry forward as named open items
+  in AGENTS.md and stay on the clock; no part of the completion claim above covers them.
 
 ## Phase 5 — Self-update (Sparkle 2)
 Gate: appcast + EdDSA-signed artifact verified by sparkle CLI; signed by available identity

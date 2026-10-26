@@ -197,9 +197,12 @@ public final class ListViewModel: Sendable {
         self.ruleMutator = refetchOnlyRuleMutator
     }
 
-    /// Seam-injected wiring (internal like AppTerminator's; tests open it via
-    /// `@testable`, the public surface keeps the brief's shape).
-    internal init(
+    /// Seam-injected wiring. INTERNAL → PUBLIC at the Phase-4 merge
+    /// (coordinator decision, recorded): the app shell lives OUTSIDE the
+    /// core module and cannot use `@testable`, while the class doc's
+    /// MERGE REQUIREMENT above names exactly this wiring — real refresh
+    /// and rule seams from outside. Signature unchanged.
+    public init(
         refreshSource: @escaping @MainActor @Sendable () async throws -> [AppRow],
         ruleMutator: @escaping @MainActor @Sendable (RuleKind, String, String?) async throws -> [AppRow]
     ) {

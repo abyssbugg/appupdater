@@ -170,10 +170,17 @@ struct InstallCoordinatorTests {
     private var testTrash: URL { root.appendingPathComponent("test-trash", isDirectory: true) }
     private let victimBundleID = "org.appupdater.coordinator.victim"
 
+    /// Per-test recycled workspace (struct init runs per test; no deinit).
+    /// The NAME is unique per PROCESS (static = computed once): concurrent
+    /// `swift test` runners each own their directory, so one runner's init
+    /// wipe can never delete another runner's live fixtures — fixed shared
+    /// roots used to do exactly that (the Phase-4 cross-process flake; see
+    /// AGENTS.md gotcha ledger).
+    private static let processWorkspace: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("appupdater-coordinator-\(UUID().uuidString)", isDirectory: true)
+
     init() {
-        // Per-test recycled workspace (struct init runs per test; no deinit).
-        let workspace = FileManager.default.temporaryDirectory
-            .appendingPathComponent("appupdater-coordinator", isDirectory: true)
+        let workspace = Self.processWorkspace
         try? FileManager.default.removeItem(at: workspace)
         try? FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         root = workspace

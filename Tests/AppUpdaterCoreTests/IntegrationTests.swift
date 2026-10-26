@@ -163,18 +163,23 @@ private let caskBase = "https://formulae.brew.sh/api/cask/"
 
 @Suite(.serialized)
 struct IntegrationTests {
-    private var root: URL = URL(fileURLWithPath: "/tmp/appupdater-integration")
+    /// Workspace is wiped at each init, so garbage from a previous run never
+    /// leaks into assertions (no deinit — structs can't have one here). The
+    /// NAME is unique per PROCESS (static = computed once): concurrent
+    /// `swift test` runners each own their directory, so one runner's init
+    /// wipe can never delete another's live fixtures — fixed shared roots
+    /// used to do exactly that (the Phase-4 cross-process flake; see
+    /// AGENTS.md gotcha ledger).
+    private static let sharedRoot: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("appupdater-integration-\(UUID().uuidString)", isDirectory: true)
+    private var root: URL = Self.sharedRoot
 
     init() {
         // Stub-owned state is suite-shared; .serialized keeps tests deterministic.
         MultiSourceStubURLProtocol.reset()
-        // Recycled per-run workspace: wiped at each init, so garbage from a previous
-        // run never leaks into assertions (no deinit — structs can't have one here).
-        let restored = FileManager.default.temporaryDirectory
-            .appendingPathComponent("appupdater-integration", isDirectory: true)
-        try? FileManager.default.removeItem(at: restored)
-        try? FileManager.default.createDirectory(at: restored, withIntermediateDirectories: true)
-        root = restored
+        try? FileManager.default.removeItem(at: Self.sharedRoot)
+        try? FileManager.default.createDirectory(at: Self.sharedRoot, withIntermediateDirectories: true)
+        root = Self.sharedRoot
     }
 
     // MARK: Engine source ordering

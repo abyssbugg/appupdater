@@ -15,11 +15,18 @@ import Testing
 struct RuleStoreTests {
     private var root: URL
 
+    /// Per-process unique workspace NAME (static = computed once): concurrent
+    /// `swift test` runners each own their directory, so one runner's init
+    /// wipe can never delete another's live fixtures — fixed shared roots
+    /// used to do exactly that (the Phase-4 cross-process flake; see
+    /// AGENTS.md gotcha ledger).
+    private static let processRoot: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("appupdater-rulestore-\(UUID().uuidString)", isDirectory: true)
+
     init() {
         // Recycled per-run workspace: wiped at each init so garbage from a
         // previous run never leaks into assertions.
-        let restored = FileManager.default.temporaryDirectory
-            .appendingPathComponent("appupdater-rulestore", isDirectory: true)
+        let restored = Self.processRoot
         try? FileManager.default.removeItem(at: restored)
         try? FileManager.default.createDirectory(at: restored, withIntermediateDirectories: true)
         root = restored

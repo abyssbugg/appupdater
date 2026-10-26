@@ -37,6 +37,11 @@ import IOKit.ps
 ///   the fire time, so the same slot can never fire again (double-fire never).
 ///   A missed slot is catch-up-fired at most once; slots missed in a long sleep
 ///   are covered by that one wake fire, never replayed slot-by-slot.
+///   A FIRST-EVER start (persisted `lastFireAt == nil`) is NOT catch-up: its
+///   single derived slot is due by construction (`nextFire(nil) == now`) and
+///   fires immediately as a NORMAL fire regardless of `onWakeCatchUp`
+///   (coordinator fix, Phase 4 — live evidence: a fresh launch recorded a
+///   phantom "wake catch-up" for a slot that was never missed).
 /// - **Battery skip reschedules at the same interval:** a due fire while
 ///   `skipOnBattery && isOnBattery()` is DEFERRED — no fire, no state record (state
 ///   describes fires, not skips — nothing is recorded, honestly), and the loop
@@ -240,7 +245,24 @@ public struct ScheduleEngine: Sendable {
                         after: dueAt, intervalSeconds: effectiveInterval, relativeTo: now)
                     continue
                 }
-                if policy.onWakeCatchUp {
+                if anchor == nil {
+                    // FIRST-EVER start (coordinator fix at Phase-4
+                    // reconciliation, live-evidence-driven): nextFire(nil)
+                    // == now makes this slot due by construction — it is
+                    // NOT a missed slot, so it fires immediately as a
+                    // NORMAL fire, unconditioned by the catch-up policy
+                    // (nextFire's documented semantics). Before this fix a
+                    // fresh launch recorded lastFireWasCatchUp = true and
+                    // the menu printed "wake catch-up for a missed slot"
+                    // although nothing had ever been missed. Persisted-nil
+                    // anchor exists only at loop start, so the two
+                    // onWakeCatchUp=false tests (persisted, grid-skip) are
+                    // unaffected.
+                    (state, anchor) = await attemptFire(
+                        policy: policy, state: state, isCatchUp: false,
+                        autoCheckBundleIDs: autoCheckBundleIDs, emit: emit)
+                    slot = nil
+                } else if policy.onWakeCatchUp {
                     (state, anchor) = await attemptFire(
                         policy: policy, state: state, isCatchUp: true,
                         autoCheckBundleIDs: autoCheckBundleIDs, emit: emit)

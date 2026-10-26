@@ -6,7 +6,7 @@ struct AppUpdaterApp: App {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        MenuBarExtra("AppUpdater", systemImage: "arrow.triangle.2.circlepath") {
+        MenuBarExtra(appState.menuBarTitle, systemImage: "arrow.triangle.2.circlepath") {
             MenuBarView(showMainWindow: {
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)

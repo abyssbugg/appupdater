@@ -104,19 +104,20 @@ Point at files that exist. A missing doc is a gap to flag, not a file to invent 
 
 ## Verification gate
 
-The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-26, Phase 3 close).**
+The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-26, Phase 4 close).**
 
 ```
-swift build                                    # PROVEN exit=0 (Phase 3 close)
-swift test                                     # PROVEN 137 tests / 13 suites, exit=0
+swift build                                    # PROVEN exit=0 (Phase 4 close)
+swift test                                     # PROVEN 196 tests / 18 suites, exit=0 (×4 this session: 3 stability runs + definitive close-out run)
+                                               # PLUS: 2 CONCURRENT full swift test runs both green, 0 failures (flake-proof protocol)
 Scripts/make-app.sh release                    # PROVEN "Assembled: build/AppUpdater.app"
 codesign -v --strict build/AppUpdater.app      # PROVEN OK (adhoc)
 plutil -lint build/AppUpdater.app/Contents/Info.plist   # PROVEN OK
-launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN launch observed + clean quit, 0 crash reports
-swift run appupdater-cli scan                  # PROVEN 82 apps inventoried from real /Applications (docs/evidence/phase3-scan.json)
-swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROVEN honest verdicts (Ghostty=update, MacUpdater=current, AdGuard/Chrome=unknown) (docs/evidence/phase3-check.json)
-swift run appupdater-cli install --apps Ghostty --out docs/evidence/phase3-installplan.json   # PROVEN real 9-step dmg plan, applied:false (dry-run)
-swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest refusal exit=3, nothing touched; --apps DoesNotExist123 --apply → exit=2; ~/Library/Application Support/AppUpdater verified ABSENT after both (refusals create nothing)
+launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN launch observed; FIRST-EVER schedule fire honest: schedule.json written with lastFireWasCatchUp=false, lastFireAt set, appsChecked=82; clean quit; 0 crash reports
+swift run appupdater-cli scan                  # PROVEN 82 apps inventoried from real /Applications (docs/evidence/phase4-scan.json)
+swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROVEN honest verdicts (Ghostty=update 1.3.1, MacUpdater=current, AdGuard/Chrome=unknown) (docs/evidence/phase4-check.json)
+swift run appupdater-cli install --apps Ghostty --out docs/evidence/phase4-installplan.json   # PROVEN real 9-step dmg plan, applied:false (dry-run)
+swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest refusal exit=3 (verdict 'current'); --apps DoesNotExist123 --apply → exit=2; ~/Library/Application Support/AppUpdater verified UNCHANGED by both (dir legitimately exists from the app's own run; refusals added no install artifacts) (docs/evidence/phase4-refuse-*.json)
 ```
 
 - swiftlint is still NOT installed (`brew install swiftlint` pending) — that gate line stays unverified and is treated as debt, not skipped silently.
@@ -128,6 +129,10 @@ swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest ref
 ## Gotcha ledger (read before touching the matching area)
 
 ```
+- **Shared fixed temp roots in test suites = cross-process fixture collision (the Phase-4 flake)** — suites whose `init()` wipes a hardcoded `temporaryDirectory/appupdater-<name>` delete ANOTHER concurrent `swift test` runner's fixtures mid-flight (`hdiutil attach failed`, `bundle.zip: No such file`); passes in isolation, fails only under parallel runners. Root-cause evidence: overlap observed during 4-lane fan-out (`ps` samples in listvm's gate). Fix: make the suite root name unique per PROCESS (`private static let …appendingPathComponent("appupdater-<name>-\(UUID().uuidString)")` — static = computed once per process, per-test wipe semantics kept), then prove with `swift test` ×3 back-to-back AND two concurrent full runs, all green. Never name a wiped test root a constant. Evidence: Phase 4 reconciliation, `DeployTests`/`IntegrationTests`/`InstallCoordinatorTests`/`RuleStoreTests`.
+- **`OSLogMessage` `'+'` interpolation-concatenation forbidden** — appending two message literals with `+` fails to compile on this SDK (OSLogMessage is not `String` Combineable). Fix: single literal, or two log calls / string building outside the logger macro. Evidence: Phase 4 rules lane (`RuleStore.swift` logging).
+- **`FileHandle.write` needs the `contents:` label on this SDK** — `handle.write(data)` is rejected; write as `handle.write(contentsOf: data)`. Evidence: Phase 4 rules lane (atomic save).
+- **`replaceItemAt` has no `originalItemURL` parameter on this SDK** — the API surface is smaller than older docs suggest; stage-then-swap with `FileManager.replaceItemAt(_:)`/`moveItem` without the original-item argument. Evidence: Phase 4 rules lane (rules.json atomic save).
 - **`FileManager.trashItem` takes an `NSURL?` inout on this SDK** — `URL?` fails with "cannot convert value of type 'URL?' to expected argument type 'NSURL?'". Fix: `var destination: NSURL?` then `(destination as URL?)?.path`. Evidence: Phase 3 close, `InstallCoordinator.trashDisposition`.
 - **Binary HTTP fixtures need a Data-native URLProtocol** — String-based stubs (like IntegrationTests') round-trip arbitrary bytes through UTF-8 and silently corrupt dmg payloads; anything binary must stub `Data` bodies + Content-Length directly. Evidence-by-design: `ApplyStubURLProtocol` in `InstallCoordinatorTests.swift` (Phase 3 close).
 - **Ternary loses contextual `@MainActor @Sendable` in Swift 6.4** — `let f: T = cond ? closureA : closureB` fails with "converting non-Sendable function value". Fix: declare the constant, assign by explicit branches so each literal gets the declared type. Evidence: `fakeTerminator` in `InstallCoordinatorTests.swift` (Phase 3 close).
@@ -147,7 +152,9 @@ swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest ref
 ## Current open items
 
 - [x] **Phase 3 (Installer) — DONE** 2026-10-26: 4 lanes (`download/backup/deploy/quitlaunch`) merged + coordinator wiring (`InstallPlanner` pure planner, `InstallCoordinator` executor composition, CLI `install` dry-run + honest `--apply`), 137 tests / 13 suites green, real-disk end-to-end (zip + dmg, backup round-trip, hijack refusal, no leftover mounts), live CLI refusals evidenced. Details + evidence: BUILD-PLAN Phase 3 block, `docs/evidence/phase3-*.json`.
-- [ ] **Phase 4 (Scheduler + UI)** — OPENED: 4 lanes (scheduler / ignore-rules store / menu-bar live data / window list UI) per BUILD-PLAN, after `Model/ScheduleStore.swift` frozen contract is committed by the coordinator.
+- [x] **Phase 4 (Scheduler + UI) — DONE** 2026-10-26: 4 lanes (`scheduler/rules/menudata/listvm`) merged; coordinator wiring (`ScheduleFileStore`, AppState orchestrator w/ engine stream + real VM seams via SeamRouter, MenuBarView/MainWindowView/ScheduleSettingsView, dynamic menu title); live-evidence fixes (first-ever fire = NORMAL fire; cross-process fixture flake root-caused + fixed + concurrency-proven). 196 tests / 18 suites, CLI + bundle + live-launch gates green, `docs/evidence/phase4-*.json`. Details: BUILD-PLAN Phase 4 block.
+- [ ] **Phase 4 deferred items (NOT done — carried open):** local notifications from scheduled fires, and the distributed-notification scriptability surface (custom names documented) — scheduled inside Phase 4, deliberately left unwired rather than claimed; design + implementation continue as Phase-4 open work when the owner resumes.
+- [ ] **Phase 5 (Self-update, Sparkle 2)** — NEXT per BUILD-PLAN: appcast + EdDSA-signed artifact verified by sparkle CLI; signed by available identity (personal-use; notarization slot documented).
 - [ ] **Cask alias table (token mapping)** — name-derived token missed `chrome`→`google-chrome` (honest unknown in the evidence run). MacUpdater-style token/bundle-id alias map is the correct later-phase work; whole-index fetch deferred per Lane B decision.
 - [ ] **Non-default Sparkle channels (beta/nightly)** — currently only the default channel is honored (AdGuard nightly correctly shows unknown). Opt-in UI for channel policy comes with the Phase 4 UI work.
 - [ ] **Backup retention wiring** — `keepLatest(_:)` exists (lane backup) but is NOT wired into the apply flow: retention policy (default N, owner-visible) belongs with the Phase 4 scheduler product decisions; nothing deletes backups silently today.
