@@ -92,6 +92,7 @@ private func enumeratedAppPath(_ directory: URL, _ component: String) throws -> 
         #expect(app.bundleVersion == "123")
         #expect(app.minimumSystemVersion == "14.0")
         #expect(app.sparkleFeedURL == nil)
+        #expect(app.suDefaultChannel == nil)  // a plist without the key captures nil
         #expect(app.isMacAppStore == false)
         #expect(app.signatureTeamID == nil)   // codesign is another lane's work
         #expect(app.checkedAt == nil)         // result stamping is another lane's work
@@ -278,5 +279,82 @@ private func enumeratedAppPath(_ directory: URL, _ component: String) throws -> 
         let twice = try await ProductionAppScanner().scan(directoryURLs: [root, root])
         #expect(once.count == 2)
         #expect(twice.count == 2)   // identical POSIX paths collapse to one entry
+    }
+
+    // MARK: - SUDefaultChannel capture (lane channels)
+
+    @Test func suDefaultChannelCapturedWhenPresent() async throws {
+        let root = try makeScanRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeBundle(in: root, name: "Channeled.app", plist: [
+            "CFBundleIdentifier": "com.acme.channeled",
+            "CFBundleName": "Channeled",
+            "SUFeedURL": "https://updates.acme.example/channeled/appcast.xml",
+            "SUDefaultChannel": "delta",
+        ])
+
+        let apps = try await ProductionAppScanner().scan(directoryURLs: [root])
+        #expect(apps.count == 1)
+        // Captured verbatim (no trimming, no case folding).
+        #expect(apps.first?.suDefaultChannel == "delta")
+    }
+
+    @Test func suDefaultChannelNilWhenKeyAbsent() async throws {
+        let root = try makeScanRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeBundle(in: root, name: "Plain.app", plist: [
+            "CFBundleIdentifier": "com.acme.plain",
+            "CFBundleName": "Plain",
+        ])
+
+        let apps = try await ProductionAppScanner().scan(directoryURLs: [root])
+        #expect(apps.count == 1)
+        #expect(apps.first?.suDefaultChannel == nil)
+    }
+
+    @Test func suDefaultChannelNilWhenEmptyString() async throws {
+        let root = try makeScanRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeBundle(in: root, name: "EmptyChannel.app", plist: [
+            "CFBundleIdentifier": "com.acme.emptychannel",
+            "CFBundleName": "EmptyChannel",
+            "SUDefaultChannel": "",   // documented: empty string counts as unset
+        ])
+
+        let apps = try await ProductionAppScanner().scan(directoryURLs: [root])
+        #expect(apps.count == 1)
+        #expect(apps.first?.suDefaultChannel == nil)
+    }
+
+    @Test func oldEncodedJSONWithoutChannelKeyStillDecodes() throws {
+        // Pre-addition fixture: the exact JSON shape the synthesized encoder wrote BEFORE the
+        // `suDefaultChannel` field existed (keys in old property order, key absent). Decoding must
+        // succeed with the channel nil — an amendment to the coordinator-owned interchange type
+        // may never break previously-written encoded UpdateCheck/rules/scan JSON.
+        let oldJSON = """
+        {"bundleIdentifier":"com.acme.old","name":"Old","path":"/Applications/Old.app",\
+        "shortVersion":"1.0","bundleVersion":"10","minimumSystemVersion":"13.0",\
+        "signatureTeamID":null,"isMacAppStore":true,\
+        "sparkleFeedURL":"https://updates.acme.example/old/appcast.xml",\
+        "checkedAt":747811200.0}
+        """
+        let app = try JSONDecoder().decode(InstalledApp.self, from: Data(oldJSON.utf8))
+        #expect(app.suDefaultChannel == nil)          // missing key ⇒ nil, decode NOT rejected
+        #expect(app.bundleIdentifier == "com.acme.old")
+        #expect(app.name == "Old")
+        #expect(app.path == "/Applications/Old.app")
+        #expect(app.shortVersion == "1.0")
+        #expect(app.bundleVersion == "10")
+        #expect(app.minimumSystemVersion == "13.0")
+        #expect(app.signatureTeamID == nil)
+        #expect(app.isMacAppStore == true)
+        #expect(app.sparkleFeedURL == "https://updates.acme.example/old/appcast.xml")
+
+        // Full decode sanity in the other direction: a present key round-trips verbatim.
+        var declared = app
+        declared.suDefaultChannel = "delta"
+        let encoded = try JSONEncoder().encode(declared)
+        let redecoded = try JSONDecoder().decode(InstalledApp.self, from: encoded)
+        #expect(redecoded.suDefaultChannel == "delta")
     }
 }
