@@ -33,9 +33,14 @@ Deferred (tracked in AGENTS.md open items): cask token alias table (chrome→goo
 
 ## Phase 3 — Installer (plain user-space, atomic swap)
 Gate: dry-run mode executes a REAL low-risk update end-to-end on the dev machine; backup verified
-- Download (HTTPS-only policy) → SHA-256 verify → extension/magic detection → backup (ZIP/DMG) →
-  quit-running-app flow → atomic swap (Sparkle-plain-installer semantics) → relaunch → post-scan.
-- Dry-run/apply separation is a hard interface from day 1.
+Split (dry-run/apply is a hard interface from day 1):
+- ✅ **Frozen interchange types** — `Sources/AppUpdaterCore/Installer/InstallModels.swift` (InstallKind/Step/Plan/Receipts/Outcome + honest error domain), coordinator-owned
+- **F. Download+Verify** (lane/download — in flight): `Installer/Download.swift` + `Checksum.swift` — HTTPS-only, streaming sha256, zip magic, sha-less refusal (EdDSA is Phase 5's)
+- **G. Backup** (lane/backup — in flight): `Installer/Backup.swift` — ditto ZIP with integrity verification + retention + restore hint
+- **H. Deploy+Swap** (lane/deploy — in flight): `Installer/Deploy.swift` + `JMSU.swift` — hdiutil/ditto deploy, JMSU-style atomic swap: perms-movable → bundle-id identity guard → mtime preserve → move-old-aside rename → move-new-in → rollback on failure; quarantined xattr release documented
+- **I. Quit+Relaunch** (lane/quitlaunch — in flight): `Installer/AppQuit.swift` — graceful terminate with provider seams, force-kill never silent, relaunch via NSWorkspace
+- **J. Coordinator** (lane = main repo): `Installer/InstallPlanner.swift` (pure; DONE, committed: step order, security-floor refusals, downgrade/MAS/low-confidence warnings — 9 planner tests) + `Installer/InstallCoordinator.swift` (wired at merge) + CLI `install` mode (dry-run live NOW; `--apply` refuses with exit 3 until executor wiring) + real-disk end-to-end integration tests
+Real-world destructive boundary (owner-decision note): applying to REAL third-party apps requires the user to run `install --apply` themselves per app; no automation does it silently.
 
 ## Phase 4 — Scheduler + UI surface
 Gate: scheduled scan triggers on timer + missed-scan catch-up; list/filter/ignore; auto-update rules
