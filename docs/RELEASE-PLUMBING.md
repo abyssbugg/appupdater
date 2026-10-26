@@ -36,7 +36,7 @@ Per-release pipeline (each step PROVEN this session — evidence:
 1. `Scripts/make-app.sh release` — assembles the bundle with
    `Sparkle.framework` embedded (+ rpath + nested adhoc signing) and bakes
    `SUFeedURL` + `SUPublicEDKey` + `SUEnableAutomaticChecks=false`.
-2. `ditto -c -k --keepParent AppUpdater.app <staging>/AppUpdater-<ver>.zip`.
+2. `ditto -c -k --keepParent build/AppUpdater.app <staging>/AppUpdater-<ver>.zip`.
 3. `sign_update -p <zip>` → prints the `sparkle:edSignature` for the item.
 4. `sign_update --verify <zip> <signature>` → **exit 0**; a one-character
    mutation of the signature → **exit 1, "failed to pass signing verification"**
@@ -110,7 +110,72 @@ signature verifying against the embedded public key.
 - A release that introduces new `force_*` errors is BLOCKED (this is the
   lint gate bite).
 
-## 4. CI pipeline (Phase 6 gate line)
+## 4. CI + review/quality toolchain (2026-10-26 batch: CircleCI, CodeRabbit, Codacy, Verity, Sourcery)
+
+State per tool — every line PROVEN or an explicit owner-step placeholder:
+
+**CircleCI** (replaces the account-blocked GitHub Actions pipeline, §5):
+- CLI authenticated (OAuth approved 2026-10-26, account `humannbaby@gmail.com`,
+  org "Weanime Inc" `c4abbd1e-575a-4c6f-bd26-0f94346ff563`).
+- `.circleci/config.yml` committed and VALIDATED locally
+  (`circleci config validate` → valid): macOS job (pinned Xcode — first run is
+  the authority on the exact hosted version; adjust the pin from the error's
+  list if needed), toolchain-evidence step, `swift build`, nonzero-test-count
+  test gate, swiftlint correctness gate, SPM caching.
+- **UNVERIFIED — owner web step:** the repo→CircleCI binding. The org has no
+  GitHub App connection for `abyssbugg/appupdater` (proven: `project get` →
+  "Project not found"). Fix: app.circleci.com → Weanime Inc → Project Setup →
+  connect GitHub (authorize as the `abyssbugg` GitHub account) → create the
+  project for the repo. The committed config is picked up automatically on the
+  next push; macOS execution then proves or names the plan constraint (Free
+  plan macOS availability will surface on the first run, honestly).
+
+**CodeRabbit** (AI code review):
+- CLI authenticated (2026-10-26; plan Advanced, seat assigned).
+- `.coderabbit.yaml` committed: chill profile, evidence/archive paths excluded,
+  path instructions encoding the repo's honesty contract (no forced unwraps in
+  Sources/, honest verdicts, Swift Testing only, per-process test roots).
+- A local committed-range review is the standing proof command:
+  `coderabbit review --committed --base-commit <ref> --agent` (first run
+  launched against the Phase-5 range; result filed with the session evidence).
+- **Owner web step (one click):** install the CodeRabbit GitHub App on
+  `abyssbugg/appupdater` at coderabbit.ai to enable automatic PR reviews.
+
+**Codacy** (cloud static analysis):
+- `codacy.yml` committed (exclusions aligned with .gitignore; swiftlint engine
+  enabled, inheriting `.swiftlint.yml` — no second divergent rule set).
+- **Owner web step:** install the Codacy GitHub App on the repo at codacy.com.
+
+**Verity** (AI quality gate on agent-written changes):
+- Fully initialized (owner answered the init questions: gate on agent stop,
+  balanced intensity, telemetry off). Hooks wired via `.claude/settings.json`.
+- `.verity/standard.yaml` — base Standard derived by the CLI, PLUS five
+  owner-approved custom patterns distilled from the repo's own contract:
+  honest-verdicts (critical), no-auto-apply (critical), swift-testing-only
+  (high), per-process-test-roots (high), no-force-unwrap-in-sources (high).
+- `.codacy/codacy.config.json` written + VALIDATED (validate-patterns: Trivy
+  4/4) — Trivy-only static set (secrets, malicious packages, critical/high
+  vulns) because the installed adapters have NO Swift linter; Swift lint
+  correctness remains swiftlint's job (CI + local gate), and the AI review
+  layer covers Swift semantics. This division is deliberate, not a gap.
+- `VERITY.md` at repo root.
+- **PENDING owner action:** uploads are FORBIDDEN until the Verity GitHub App
+  is authorized for `abyssbugg/appupdater`. The device-flow login was
+  completed under a DIFFERENT GitHub account than the repo owner — re-run
+  `verity login --force` and authorize AS `abyssbugg` (or grant the Verity App
+  access to the repo from the abyssbugg GitHub settings), then
+  `verity standard push` + `verity config push` + `verity memory seed`.
+  Until then Verity runs local-only (gate works, no cloud history).
+
+**Sourcery** (Swift metaprogramming/codegen):
+- 2.3.0 installed via brew; `.sourcery.yml` committed (sources: Sources,
+  templates: Scripts/SourceryTemplates, output parked in gitignored .build).
+- PROVEN run: full-tree scan finished clean (0.05s) with ZERO templates —
+  deliberate: no boilerplate repetition exists to justify generated code yet
+  (Scripts/SourceryTemplates/README.md). Add a template only when a real
+  repetition appears.
+
+## 5. CI pipeline (Phase 6 gate line — GitHub Actions)
 
 - `.github/workflows/ci.yml` committed: macOS hosted runner, `swift build`
   + `swift test` + swiftlint presence-annotated step (fails honest when the

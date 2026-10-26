@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "metadata": {
+    "source": "local",
+    "languages": ["Swift", "Shell"]
+  },
+  "tools": [
+    {
+      "toolId": "Trivy",
+      "patterns": [
+        { "patternId": "Trivy_malicious_packages" },
+        { "patternId": "Trivy_secret" },
+        { "patternId": "Trivy_vulnerability_critical" },
+        { "patternId": "Trivy_vulnerability_high" }
+      ]
+    }
+  ],
+  "exclude": [
+    "**/build/**",
+    "**/.build/**",
+    "**/.worktrees/**",
+    "**/docs/evidence/**",
+    "**/Package.resolved"
+  ]
+}

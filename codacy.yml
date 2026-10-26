@@ -1,0 +1,22 @@
+---
+# Codacy configuration — AppUpdater
+# The Codacy cloud app (GitHub App install + repo enablement at codacy.com)
+# is an owner web step; this file is the repo-side policy it consumes.
+# Local parity: `codacy-analysis-cli` is deprecated upstream, so the source of
+# truth for lint correctness on this machine is .swiftlint.yml (same rules the
+# CI enforces). Keep these exclusions aligned with .gitignore.
+#
+# NOTE: Codacy's Swift support runs swiftlint under the hood — the repo's
+# .swiftlint.yml is the calibrated policy (style = warnings; force_cast /
+# force_try / force_unwrapping = errors). Do not add a second divergent rule
+# set here; Codacy inherits severity from the repo config.
+exclude_paths:
+  - build/**
+  - .build/**
+  - .worktrees/**
+  - docs/evidence/**
+  - docs/archive/**
+  - "**/Package.resolved"
+engines:
+  swiftlint:
+    enabled: true

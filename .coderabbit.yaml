@@ -1,0 +1,35 @@
+# CodeRabbit review configuration — AppUpdater
+# The GitHub App installation itself is an owner web step (one click at
+# coderabbit.ai → install on abyssbugg/appupdater); this file tunes behavior
+# once installed. Local/CLI reviews use the same policy via the CodeRabbit CLI.
+language: en-US
+early_access: false
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!docs/evidence/**"
+    - "!docs/archive/**"
+    - "!build/**"
+    - "!**/Package.resolved"
+  path_instructions:
+    - path: "**/*.swift"
+      instructions: >-
+        Enforce the repo's honesty contract (CLAUDE.md §7): no forced unwraps
+        in Sources/, no fabricated success paths, honest error surfaces,
+        root-cause fixes over workarounds (undocumented workarounds are
+        violations). Tests must be Swift Testing (XCTest discovery is broken on
+        the locked toolchain). Shared temp roots in tests must be per-process
+        unique (AGENTS.md gotcha ledger).
+    - path: "Scripts/**"
+      instructions: >-
+        Shell changes must keep the signing order (nested code before outer
+        bundle) and the personal-use ad-hoc posture — no distribution claims.
+chat:
+  auto_reply: true

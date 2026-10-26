@@ -9,3 +9,11 @@ DerivedData/
 *.orig
 *.rej
 .netlify/
+
+# Verity — machine-local state. Everything in .verity/ is ignored except the
+# shared standard, which is meant to be committed. The knowledge graph under
+# .verity/memory/ is machine-local too: the service rebuilds it, and committing
+# it puts generated notes in every diff and pull request.
+.verity/*
+!.verity/standard.yaml
+.claude/settings.local.json

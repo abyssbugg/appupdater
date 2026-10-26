@@ -1,0 +1,75 @@
+version: 2.1
+
+# AppUpdater CI (moved here after GitHub-hosted runners proved account-blocked —
+# see docs/RELEASE-PLUMBING.md §4 for that diagnosis).
+#
+# Honesty contract (CLAUDE.md §7, same as the repo's standing gate):
+# - The toolchain-evidence step MUST print swift --version first. The locked
+#   local toolchain is Xcode 27-beta / Swift 6.4 (AGENTS.md "Stack freeze");
+#   hosted Xcode may differ — any behavioral divergence becomes a gotcha-ledger
+#   entry, never a silent waiver.
+# - The test gate requires a NONZERO collected test count: XCTest discovery is
+#   broken on beta toolchains (AGENTS.md gotcha ledger), so a silent "0 tests"
+#   green run is a failure, not a pass.
+# - swiftlint: correctness rules (force_cast/force_try/force_unwrapping) are
+#   ERRORS per .swiftlint.yml policy; style stays warning.
+# - Signing stays PERSONAL-USE ad-hoc; this pipeline makes NO distribution or
+#   notarization claim (LOCKED decision 9 until owner enrolls).
+
+jobs:
+  build-test:
+    # Pinned hosted Xcode — the pipeline's first run is the authority on what
+    # is actually available; adjust the pin from the error's "available
+    # versions" list if this exact one is not offered (honest iteration).
+    macos:
+      xcode: 16.4.0
+    resource_class: macos.m1.medium
+    steps:
+      - checkout
+
+      - restore_cache:
+          keys:
+            - spm-v1-{{ checksum "Package.resolved" }}
+            - spm-v1-
+
+      - run:
+          name: Toolchain evidence (required first-run line)
+          command: |
+            swift --version
+            xcodebuild -version
+            sw_vers
+
+      - run:
+          name: Build (debug)
+          command: swift build
+
+      - run:
+          name: Test (Swift Testing; gate requires nonzero test count)
+          command: |
+            set -o pipefail
+            swift test 2>&1 | tee /tmp/test.log
+            grep -qE "Test run with [1-9][0-9]* tests" /tmp/test.log || {
+              echo "FAIL: test count line missing or zero (XCTest discovery trap)"
+              exit 1
+            }
+
+      - run:
+          name: swiftlint (correctness rules are errors)
+          command: |
+            brew install swiftlint
+            swiftlint lint --quiet
+            swiftlint lint --quiet | grep -E ": error: " && {
+              echo "FAIL: correctness-relevant lint violations present"
+              exit 1
+            } || echo "no lint errors"
+
+      - save_cache:
+          key: spm-v1-{{ checksum "Package.resolved" }}
+          paths:
+            - .build
+            - ~/Library/Caches/org.swift.swiftpm
+
+workflows:
+  build-and-test:
+    jobs:
+      - build-test

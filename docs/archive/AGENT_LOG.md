@@ -5,6 +5,19 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-26 — Toolchain batch: CircleCI + CodeRabbit + Codacy + Verity + Sourcery wired (owner bindings pending where web-UI-only)
+
+**Confirmed (live evidence):**
+1. **CircleCI** — CLI authenticated via OAuth (owner approved; account humannbaby@gmail.com, org "Weanime Inc"). `.circleci/config.yml` committed and `circleci config validate` → valid: macOS job with toolchain-evidence step, `swift build`, nonzero-test-count gate (the XCTest-discovery trap), swiftlint correctness gate, SPM cache. Repo→CircleCI binding NOT possible headlessly (proven: `project get` → Project not found; the org has no GitHub App for abyssbugg) — owner web step documented.
+2. **CodeRabbit** — CLI authenticated (Advanced plan, seat assigned). `.coderabbit.yaml` committed with path instructions encoding the repo's honesty contract. Local committed-range review of the Phase-5 work launched via `coderabbit review --committed --base-commit af270b1 --agent` (result to be filed as evidence; 7–30 min runtime).
+3. **Codacy** — `codacy.yml` committed (exclusions aligned to .gitignore; swiftlint engine inheriting `.swiftlint.yml`, no divergent second rule set). Cloud app install = owner web step.
+4. **Verity** — full init run with owner-answered questions (gate on agent stop, balanced intensity, telemetry off). Standard derived by the CLI, then FIVE custom patterns proposed from the repo's own contract and owner-approved (adopt all): honest-verdicts (critical), no-auto-apply (critical), swift-testing-only (high), per-process-test-roots (high), no-force-unwrap-in-sources (high). `.codacy/codacy.config.json` written + validate-patterns PASS (Trivy 4/4 — deliberate Trivy-only static set: installed adapters have no Swift linter; swiftlint owns Swift lint in CI/local, AI review covers Swift semantics). Hooks wired (`.claude/settings.json`), `VERITY.md` written. Uploads FORBIDDEN: the device-flow login was completed under a different GitHub account than the repo owner — owner must re-run `verity login --force` authorizing AS `abyssbugg`, then `verity standard push` + `verity config push` + `verity memory seed`. Local-only mode until then (gate still runs).
+5. **Sourcery** — 2.3.0 installed via brew; `.sourcery.yml` committed; full-tree scan proven clean (0.05s) with ZERO templates — deliberate (no boilerplate repetition to justify codegen; documented in Scripts/SourceryTemplates/README.md).
+
+**Honest boundaries:** three services wait on owner web-UI bindings (CircleCI GitHub App connect, CodeRabbit App install, Codacy App install) and Verity waits on the correct-account re-login — all documented with exact fix paths in `docs/RELEASE-PLUMBING.md §4`. Nothing was claimed done that a browser step gates.
+
+---
+
 ## 2026-10-26 — CI diagnosed to the account level by elimination; pipeline ready, owner billing action required
 
 **Confirmed (live evidence):** every GitHub Actions run on this repo ends `startup_failure` at 0s — before any job, log, or check-run exists. Eliminated by experiment: (1) workflow file validates clean (actionlint 1.7.12 + YAML parse), (2) failure reproduces identically on `macos-latest` AND explicit `macos-15` (runs 40391581108 / 40398462700 / 40399629148), (3) a minimal 5-line `ubuntu-latest` echo probe on a side branch startup-fails the same way (run 40399992275 + PR #1 event; probe closed and deleted after the diagnosis). Repo Actions enabled with `allowed_actions: all`; repo not disabled. **Remaining cause class: account/billing** — hosted runners on this private repo (free plan) require the owner's payment-method/spending confirmation (web-UI-only). Fix path + re-run instructions documented in `docs/RELEASE-PLUMBING.md §4`. The ci.yml workflow itself is committed and ready; its first green run must print `swift --version` as toolchain evidence.
