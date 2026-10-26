@@ -5,6 +5,12 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-26 — CI diagnosed to the account level by elimination; pipeline ready, owner billing action required
+
+**Confirmed (live evidence):** every GitHub Actions run on this repo ends `startup_failure` at 0s — before any job, log, or check-run exists. Eliminated by experiment: (1) workflow file validates clean (actionlint 1.7.12 + YAML parse), (2) failure reproduces identically on `macos-latest` AND explicit `macos-15` (runs 40391581108 / 40398462700 / 40399629148), (3) a minimal 5-line `ubuntu-latest` echo probe on a side branch startup-fails the same way (run 40399992275 + PR #1 event; probe closed and deleted after the diagnosis). Repo Actions enabled with `allowed_actions: all`; repo not disabled. **Remaining cause class: account/billing** — hosted runners on this private repo (free plan) require the owner's payment-method/spending confirmation (web-UI-only). Fix path + re-run instructions documented in `docs/RELEASE-PLUMBING.md §4`. The ci.yml workflow itself is committed and ready; its first green run must print `swift --version` as toolchain evidence.
+
+---
+
 ## 2026-10-26 — Phase 5 (Self-update, Sparkle 2) COMPLETE — EdDSA chain proven end-to-end
 
 **Confirmed (live evidence, this session):**

@@ -115,9 +115,18 @@ signature verifying against the embedded public key.
 - `.github/workflows/ci.yml` committed: macOS hosted runner, `swift build`
   + `swift test` + swiftlint presence-annotated step (fails honest when the
   runner lacks the tool — pinned availability note lives in the file).
-- **UNVERIFIED until first live run (recorded honestly):** which Xcode the
-  hosted runner picks by default, and whether Xcode 27-beta (the locked local
-  toolchain) is simultaneously available there. First CI run must print
-  `swift --version` / selected Xcode as its evidence line; if the runner's
-  toolchain differs from local, the workflow still must pass SPEC tests —
-  any behavioral difference becomes an AGENTS.md gotcha entry, not silence.
+- **UNVERIFIED — blocked at the ACCOUNT level (diagnosed by elimination, 2026-10-26):**
+  every GitHub Actions run on this repo fails `startup_failure` at 0s — before
+  any job or log exists. Eliminated by evidence: the workflow file is valid
+  (actionlint clean + YAML parse OK), the failure reproduces on BOTH
+  `macos-latest` and explicit `macos-15` labels, AND on a minimal 5-line
+  `ubuntu-latest` echo probe on a side branch (probe PR #1, closed after the
+  diagnosis). Repo Actions are enabled (`allowed_actions: all`) and the repo
+  is not disabled. Remaining cause class: **account/billing** — hosted-runner
+  usage on this private repo (free plan) requires a payment method / spending
+  confirmation in GitHub Settings → Billing; that is owner-only (web UI).
+  OWNER FIX PATH: github.com → Settings → Billing and plans → add/confirm a
+  payment method (or set a spending limit), then re-run any workflow; the next
+  run's first live output must print `swift --version` as the toolchain
+  evidence line (if the runner's Xcode differs from the locked local 27-beta,
+  any behavioral divergence becomes a gotcha-ledger entry, not a silent waiver).
