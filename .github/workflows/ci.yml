@@ -7,7 +7,11 @@ on:
 
 jobs:
   build-test:
-    runs-on: macos-latest
+    # Pinned explicit label (macos-latest startup-failed twice at 0s with a
+    # workflow-file-issue notice while the file validated clean under actionlint
+    # — recorded honestly; macos-15 is the explicit ARM macOS 15 image).
+    runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
