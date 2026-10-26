@@ -169,6 +169,14 @@ struct InstallCoordinatorTests {
     private var backupsRoot: URL { root.appendingPathComponent("backups", isDirectory: true) }
     private var testTrash: URL { root.appendingPathComponent("test-trash", isDirectory: true) }
     private let victimBundleID = "org.appupdater.coordinator.victim"
+    /// The victim's per-app backups folder — the exact folder the apply's own
+    /// backup step writes into (Backup's sanitized-folder-name policy reused,
+    /// never a resurgent name format invented by tests).
+    private var victimBackupFolder: URL {
+        backupsRoot.appendingPathComponent(
+            BackupManager.sanitizedFolderName(forBundleIdentifier: victimBundleID),
+            isDirectory: true)
+    }
 
     /// Per-test recycled workspace (struct init runs per test; no deinit).
     /// The NAME is unique per PROCESS (static = computed once): concurrent
@@ -221,7 +229,8 @@ extension InstallCoordinatorTests {
     /// Trash is never involved.
     private func coordinator(
         _ seams: Seams,
-        hook: (@Sendable (DownloadedUpdate) throws -> Void)? = nil
+        hook: (@Sendable (DownloadedUpdate) throws -> Void)? = nil,
+        retentionKeep: Int? = 3
     ) -> InstallCoordinator {
         let trashDir = testTrash
         let disposed = seams.disposed
@@ -236,7 +245,48 @@ extension InstallCoordinatorTests {
             downloader: UpdateDownloader(session: applyStubSession()),
             terminator: fakeTerminator(openerCalls: seams.openerCalls, alwaysRunning: false),
             disposeOfOldCopy: disposition,
-            postDownloadHook: hook)
+            postDownloadHook: hook,
+            retentionKeep: retentionKeep)
+    }
+
+    // MARK: Backup-retention fixtures (BACKUP RETENTION v1, wired 2026-10-26)
+
+    /// Seeds one MANAGED-name backup file into the victim's per-app backups
+    /// folder using Backup's OWN naming policy (`zipFileName` — timestamp token
+    /// prefix + safe name); bytes are unique per seed so byte-for-byte "untouched"
+    /// comparisons are meaningful. Pre-seeds carry DISTINCT past ISO timestamps
+    /// so newest-first name-token retention ordering is unambiguous.
+    private func seedBackup(isoDate: String) throws -> (name: String, bytes: Data) {
+        let date = Self.utcDate(isoDate)
+        try FileManager.default.createDirectory(
+            at: victimBackupFolder, withIntermediateDirectories: true)
+        let name = BackupManager.zipFileName(for: date, bundleBaseName: "PreSeed")
+        let bytes = Data("appupdater-preseed-\(isoDate)-\(UUID().uuidString)".utf8)
+        try bytes.write(to: victimBackupFolder.appendingPathComponent(name), options: [.atomic])
+        return (name, bytes)
+    }
+
+    /// Fixed-width UTC parse for the seed-table constants (same UTC token clock
+    /// Backup uses for the name prefix). A malformed CONSTANT is a programmer
+    /// error, so it fails fast — the call sites ship known-good strings.
+    private static func utcDate(_ iso: String) -> Date {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        guard let date = formatter.date(from: iso) else {
+            preconditionFailure("fixture seed constant is not ISO8601: \(iso)")
+        }
+        return date
+    }
+
+    /// Sorted managed-member file names of the victim's backups folder.
+    private func backupNames() throws -> [String] {
+        try FileManager.default.contentsOfDirectory(
+            atPath: victimBackupFolder.path(percentEncoded: false)).sorted()
+    }
+
+    /// Current byte content of a named backup file (for before/after equality).
+    private func backupBytes(named name: String) throws -> Data {
+        try Data(contentsOf: victimBackupFolder.appendingPathComponent(name))
     }
 
     /// The fixture's OWN name is served — the planner derives the artifact kind
@@ -611,5 +661,236 @@ extension InstallCoordinatorTests {
         #expect(roundTrip.backup?.byteCount == outcome.backup?.byteCount)
         #expect(roundTrip.backup?.originalShortVersion == outcome.backup?.originalShortVersion)
         #expect(roundTrip.plan == outcome.plan)
+    }
+}
+
+extension InstallCoordinatorTests {
+    // MARK: Backup retention v1 (wired 2026-10-26; decision at the coordinator head)
+    //
+    // Store contents are enumerated by NAME in the victim's per-app backups
+    // folder; pre-seeds use Backup's own name policy with DISTINCT past ISO
+    // timestamps so newest-first ordering is deterministic. A refused apply
+    // (deadline: any abort) must never prune; retention only fires on the
+    // fully green chain.
+
+    /// Green apply with 4 pre-seeded older backups, keep = 3 → the store ends
+    /// holding EXACTLY 3 members: the fresh backup plus the two newest seeds;
+    /// the two oldest seeds are pruned; the note states kept-3.
+    @Test func greenApplyRetentionKeepThreePrunesToExactlyThree() async throws {
+        _ = try makeVictim()
+        let next = try ApplyFixture.makeApp(
+            in: root.appendingPathComponent("artifact-src", isDirectory: true),
+            name: "Victim", bundleID: victimBundleID,
+            shortVersion: "2.0", bundleVersion: "20")
+        let zipURL = root.appendingPathComponent("victim-2.0.zip")
+        try ApplyFixture.makeZip(of: next, at: zipURL)
+        try serve(zipURL)
+
+        var seedNames: [String: String] = [:]
+        for iso in ["2026-10-20T09:00:00Z", "2026-10-21T09:00:00Z",
+                    "2026-10-22T09:00:00Z", "2026-10-23T09:00:00Z"] {
+            let seeded = try seedBackup(isoDate: iso)
+            seedNames[iso] = seeded.name
+        }
+        let bytesAtSeed = try seedNames.values.reduce(into: [String: Data]()) {
+            $0[$1] = try backupBytes(named: $1)
+        }
+
+        let seams = Seams(openerCalls: LockedBox<[URL]>([]), disposed: LockedBox<[URL]>([]))
+        let coordinator = coordinator(seams, retentionKeep: 3)
+        let plan = try planOf(artifact: zipURL)
+        let outcome = await coordinator.run(
+            plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot)
+
+        #expect(outcome.abortedStep == nil)
+        let fresh = try #require(outcome.backup)
+        let names = try backupNames()
+        #expect(names.count == 3)
+        #expect(names.contains(fresh.zipURL.lastPathComponent)) // NEW backup among the kept
+        #expect(!names.contains(try #require(seedNames["2026-10-20T09:00:00Z"]))) // oldest pruned
+        #expect(!names.contains(try #require(seedNames["2026-10-21T09:00:00Z"]))) // second-oldest pruned
+        for iso in ["2026-10-22T09:00:00Z", "2026-10-23T09:00:00Z"] { // newest seeds survive BYTE-FOR-BYTE
+            let name = try #require(seedNames[iso])
+            let seededBytes = try #require(bytesAtSeed[name])
+            #expect(names.contains(name))
+            #expect(try backupBytes(named: name) == seededBytes)
+        }
+        #expect(outcome.retentionNote == "kept 3 newest backups (retention v1 = 3; pruned 2)")
+    }
+
+    /// keep = 2 with 3 pre-seeded backups → exactly 2 members survive the
+    /// green apply (the newest seed + the fresh backup) and the note's kept
+    /// count follows the POLICY (2), not the fixture size.
+    @Test func greenApplyRetentionKeepTwoEndsAtExactlyTwo() async throws {
+        _ = try makeVictim()
+        let next = try ApplyFixture.makeApp(
+            in: root.appendingPathComponent("artifact-src", isDirectory: true),
+            name: "Victim", bundleID: victimBundleID,
+            shortVersion: "2.0", bundleVersion: "20")
+        let zipURL = root.appendingPathComponent("victim-2.0.zip")
+        try ApplyFixture.makeZip(of: next, at: zipURL)
+        try serve(zipURL)
+
+        var seedNames: [String: String] = [:]
+        for iso in ["2026-10-20T09:00:00Z", "2026-10-21T09:00:00Z", "2026-10-22T09:00:00Z"] {
+            let seeded = try seedBackup(isoDate: iso)
+            seedNames[iso] = seeded.name
+        }
+        let bytesAtSeed = try seedNames.values.reduce(into: [String: Data]()) {
+            $0[$1] = try backupBytes(named: $1)
+        }
+
+        let seams = Seams(openerCalls: LockedBox<[URL]>([]), disposed: LockedBox<[URL]>([]))
+        let coordinator = coordinator(seams, retentionKeep: 2)
+        let plan = try planOf(artifact: zipURL)
+        let outcome = await coordinator.run(
+            plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot)
+
+        #expect(outcome.abortedStep == nil)
+        let fresh = try #require(outcome.backup)
+        let names = try backupNames()
+        #expect(names.count == 2)
+        #expect(names.contains(fresh.zipURL.lastPathComponent))
+        #expect(names.contains(try #require(seedNames["2026-10-22T09:00:00Z"]))) // newest seed survives
+        #expect(!names.contains(try #require(seedNames["2026-10-20T09:00:00Z"]))) // oldest pruned
+        #expect(!names.contains(try #require(seedNames["2026-10-21T09:00:00Z"]))) // next-oldest pruned
+        let survivor = try #require(seedNames["2026-10-22T09:00:00Z"]) // newest seed survives byte-for-byte
+        let seededBytes = try #require(bytesAtSeed[survivor])
+        #expect(names.contains(survivor))
+        #expect(try backupBytes(named: survivor) == seededBytes)
+        #expect(outcome.retentionNote == "kept 2 newest backups (retention v1 = 2; pruned 2)")
+    }
+
+    /// retentionKeep = nil disables retention ENTIRELY: the green apply still
+    /// creates its own backup (that is the backup step, not retention), the
+    /// pre-seeded set is untouched BYTE-FOR-BYTE, and the note stays nil.
+    @Test func retentionDisabledLeavesStoreUntouchedNoteNil() async throws {
+        _ = try makeVictim()
+        let next = try ApplyFixture.makeApp(
+            in: root.appendingPathComponent("artifact-src", isDirectory: true),
+            name: "Victim", bundleID: victimBundleID,
+            shortVersion: "2.0", bundleVersion: "20")
+        let zipURL = root.appendingPathComponent("victim-2.0.zip")
+        try ApplyFixture.makeZip(of: next, at: zipURL)
+        try serve(zipURL)
+
+        var seedNames: [String: String] = [:]
+        for iso in ["2026-10-20T09:00:00Z", "2026-10-21T09:00:00Z", "2026-10-22T09:00:00Z"] {
+            let seeded = try seedBackup(isoDate: iso)
+            seedNames[iso] = seeded.name
+        }
+        let bytesAtSeed = try seedNames.values.reduce(into: [String: Data]()) {
+            $0[$1] = try backupBytes(named: $1)
+        }
+
+        let seams = Seams(openerCalls: LockedBox<[URL]>([]), disposed: LockedBox<[URL]>([]))
+        let coordinator = coordinator(seams, retentionKeep: nil)
+        let plan = try planOf(artifact: zipURL)
+        let outcome = await coordinator.run(
+            plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot)
+
+        #expect(outcome.abortedStep == nil)
+        #expect(outcome.backup != nil) // apply's own backup still made
+        let names = try backupNames()
+        #expect(names.count == 4) // 3 pre-seeds + the fresh backup, NOTHING pruned
+        for (name, bytes) in bytesAtSeed { // pre-seeds byte-for-byte untouched
+            #expect(names.contains(name))
+            #expect(try backupBytes(named: name) == bytes)
+        }
+        #expect(outcome.retentionNote == nil)
+    }
+
+    /// A REFUSED apply (identity hijack, refused at .swapBundles — the deepest
+    /// pre-green refusal, already past the backup step) never prunes: the two
+    /// pre-seeded zips are byte-for-byte untouched and the note stays nil even
+    /// with retention enabled. The backup the apply ITSELF created before the
+    /// refusal legitimately remains (it is the backup step's own receipt).
+    @Test func hijackRefusalNeverPrunesPreSeededBackups() async throws {
+        let originalPlist = try makeVictim()
+        let hijacker = try ApplyFixture.makeApp(
+            in: root.appendingPathComponent("artifact-src", isDirectory: true),
+            name: "Victim", bundleID: "org.appupdater.hijacker",
+            shortVersion: "9.9", bundleVersion: "99")
+        let zipURL = root.appendingPathComponent("victim-hijack.zip")
+        try ApplyFixture.makeZip(of: hijacker, at: zipURL)
+        try serve(zipURL)
+
+        var seedNames: [String: String] = [:]
+        for iso in ["2026-10-20T09:00:00Z", "2026-10-21T09:00:00Z"] {
+            let seeded = try seedBackup(isoDate: iso)
+            seedNames[iso] = seeded.name
+        }
+        let bytesAtSeed = try seedNames.values.reduce(into: [String: Data]()) {
+            $0[$1] = try backupBytes(named: $1)
+        }
+
+        let seams = Seams(openerCalls: LockedBox<[URL]>([]), disposed: LockedBox<[URL]>([]))
+        let coordinator = coordinator(seams, retentionKeep: 3)
+        let plan = try planOf(artifact: zipURL, claim: "9.9")
+        let outcome = await coordinator.run(
+            plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot)
+
+        #expect(outcome.abortedStep == .swapBundles)
+        #expect(try ApplyFixture.plistBytes(of: victimPath) == originalPlist) // victim intact
+        #expect(outcome.backup != nil) // the APPLY's backup receipt survives the abort
+        let names = try backupNames()
+        #expect(names.count == 3) // 2 pre-seeds + the apply's own backup — nothing pruned
+        for (name, bytes) in bytesAtSeed { // pre-seeds byte-for-byte untouched
+            #expect(names.contains(name))
+            #expect(try backupBytes(named: name) == bytes)
+        }
+        #expect(outcome.retentionNote == nil) // retention never ran on a refused apply
+    }
+
+    /// Codable honesty across the amendment: with the note present it survives
+    /// the JSON round-trip; the OLD report shape (no retentionNote key — every
+    /// JSON written before the 2026-10-26 amendment) still decodes, reading
+    /// the new field as nil with everything else intact.
+    @Test func outcomeCodableRoundTripWithAndWithoutRetentionNote() async throws {
+        _ = try makeVictim()
+        let next = try ApplyFixture.makeApp(
+            in: root.appendingPathComponent("artifact-src", isDirectory: true),
+            name: "Victim", bundleID: victimBundleID,
+            shortVersion: "2.0", bundleVersion: "20")
+        let zipURL = root.appendingPathComponent("victim-2.0.zip")
+        try ApplyFixture.makeZip(of: next, at: zipURL)
+        try serve(zipURL)
+
+        for iso in ["2026-10-20T09:00:00Z", "2026-10-21T09:00:00Z", "2026-10-22T09:00:00Z"] {
+            _ = try seedBackup(isoDate: iso)
+        }
+
+        let seams = Seams(openerCalls: LockedBox<[URL]>([]), disposed: LockedBox<[URL]>([]))
+        let coordinator = coordinator(seams, retentionKeep: 3)
+        let plan = try planOf(artifact: zipURL)
+        let outcome = await coordinator.run(
+            plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot)
+        #expect(outcome.abortedStep == nil)
+        #expect(outcome.retentionNote == "kept 3 newest backups (retention v1 = 3; pruned 1)")
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try encoder.encode(outcome)
+
+        // (a) New shape: the note round-trips byte-equal.
+        let roundTrip = try decoder.decode(InstallOutcome.self, from: data)
+        #expect(roundTrip.retentionNote == outcome.retentionNote)
+        #expect(roundTrip.abortedStep == outcome.abortedStep)
+
+        // (b) OLD shape: strip the key from the top-level object (exactly the
+        // absence a pre-amendment report produces), then decode — the field
+        // reads nil and the rest is unchanged.
+        var legacyObject = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacyObject.removeValue(forKey: "retentionNote")
+        let legacy = try decoder.decode(
+            InstallOutcome.self, from: try JSONSerialization.data(withJSONObject: legacyObject))
+        #expect(legacy.retentionNote == nil)
+        #expect(legacy.abortedStep == outcome.abortedStep)
+        #expect(legacy.finalInstalledShortVersion == outcome.finalInstalledShortVersion)
+        #expect(legacy.receipts.count == outcome.receipts.count)
+        #expect(legacy.receipts.map(\.step) == outcome.receipts.map(\.step))
     }
 }

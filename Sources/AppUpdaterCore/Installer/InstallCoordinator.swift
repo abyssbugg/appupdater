@@ -34,6 +34,24 @@
 //     install happened, but verification would not vouch for it; reports show
 //     both truths side by side.
 //   • Nothing here shells out to `sudo`; user-space only (project floor).
+//   • BACKUP RETENTION is hygiene, not a step: its outcome surfaces ONLY in
+//     `InstallOutcome.retentionNote` and can never add/remove receipts,
+//     change `abortedStep`, or downgrade a green apply.
+//
+// BACKUP RETENTION v1 — decision 2026-10-26, coordinator, owner-delegated:
+// default keep 3, nil disables, best-effort only, refusals never prune,
+// hygiene failures never abort apply.
+//
+// Wiring contract of this file (v1): exactly ONE retention call site exists —
+// at the end of a fully green apply chain (after postScan passed, before the
+// final `return done()`), calling `backupManager.keepLatest(_, in:)`. It runs
+// there because: (a) the backup step has produced its BackupReceipt, so the
+// just-created zip takes its chronological place in the newest-first order;
+// and (b) ONLY a chain that reached a green postScan is "a successful apply"
+// — every earlier `return done()` is an aborted or refused apply, where the
+// backup store must remain untouched (refusals never prune). `retentionKeep`
+// is nil = retention fully disabled; ≥ 1 = keep that many newest; < 1 is
+// rejected at init (programmer error — see `validateRetentionKeep`).
 
 import Foundation
 
@@ -49,6 +67,15 @@ public struct InstallCoordinator: Sendable {
     /// swapBundles receipt records the retention honestly. Tests inject a fake so
     /// the user's real Trash is never touched.
     public let disposeOfOldCopy: @Sendable (URL) throws -> String?
+    /// BACKUP RETENTION v1 policy (decision 2026-10-26 — record at the head of
+    /// this file): how many newest managed backup zips `BackupManager.keepLatest`
+    /// keeps store-wide after a fully GREEN apply. `nil` disables retention
+    /// entirely (no pruner call is ever made and `InstallOutcome.retentionNote`
+    /// stays nil); values ≥ 1 keep that many newest (default 3); values < 1 are
+    /// rejected at init as a programmer error. Best-effort ONLY: a retention
+    /// failure is caught and recorded in the note — it can never abort or
+    /// downgrade a green apply, and refusals never prune.
+    public let retentionKeep: Int?
     /// Test seam (internal): applied immediately after the download receipt is
     /// written, BEFORE the independent sha256 re-verification — mutations it
     /// makes to the staged bytes are exactly what the indepedent verify is
@@ -56,16 +83,20 @@ public struct InstallCoordinator: Sendable {
     /// seam, following the AppTerminator internal-init pattern).
     let postDownloadHook: (@Sendable (DownloadedUpdate) throws -> Void)?
 
-    /// Production wiring: real session, real terminator, Trash disposition.
+    /// Production wiring: real session, real terminator, Trash disposition,
+    /// BACKUP RETENTION v1 default (keep 3).
     public init(
         session: URLSession = .shared,
         terminator: AppTerminator = AppTerminator(),
-        disposeOfOldCopy: @escaping @Sendable (URL) throws -> String? = InstallCoordinator.trashDisposition
+        disposeOfOldCopy: @escaping @Sendable (URL) throws -> String? = InstallCoordinator.trashDisposition,
+        retentionKeep: Int? = 3
     ) {
+        Self.validateRetentionKeep(retentionKeep)
         self.downloader = UpdateDownloader(session: session)
         self.backupManager = BackupManager()
         self.terminator = terminator
         self.disposeOfOldCopy = disposeOfOldCopy
+        self.retentionKeep = retentionKeep
         self.postDownloadHook = nil
     }
 
@@ -74,12 +105,15 @@ public struct InstallCoordinator: Sendable {
         downloader: UpdateDownloader,
         terminator: AppTerminator,
         disposeOfOldCopy: @escaping @Sendable (URL) throws -> String?,
-        postDownloadHook: (@Sendable (DownloadedUpdate) throws -> Void)?
+        postDownloadHook: (@Sendable (DownloadedUpdate) throws -> Void)?,
+        retentionKeep: Int? = 3
     ) {
+        Self.validateRetentionKeep(retentionKeep)
         self.downloader = downloader
         self.backupManager = BackupManager()
         self.terminator = terminator
         self.disposeOfOldCopy = disposeOfOldCopy
+        self.retentionKeep = retentionKeep
         self.postDownloadHook = postDownloadHook
     }
 
@@ -115,6 +149,11 @@ public struct InstallCoordinator: Sendable {
         var backupReceipt: BackupReceipt?
         var finalInstalledVersion: String?
         var abortedStep: InstallStep?
+        /// BACKUP RETENTION v1 hygiene note; nil unless a fully green apply ran
+        /// with retention enabled — the single honest place where the pruner's
+        /// result (or its failure) is reported. See the decision record at the
+        /// head of this file.
+        var retentionNote: String?
         let fm = FileManager.default
 
         let workspace = stagingRoot.appendingPathComponent(
@@ -141,7 +180,8 @@ public struct InstallCoordinator: Sendable {
         func done() -> InstallOutcome {
             InstallOutcome(
                 plan: plan, receipts: receipts, abortedStep: abortedStep,
-                finalInstalledShortVersion: finalInstalledVersion, backup: backupReceipt)
+                finalInstalledShortVersion: finalInstalledVersion, backup: backupReceipt,
+                retentionNote: retentionNote)
         }
 
         // MARK: .download — stream + hash-while-writing + SourceHash gate
@@ -294,6 +334,29 @@ public struct InstallCoordinator: Sendable {
                 detail: "post-scan: \(plan.app.path) serves bundle id \(scannedID ?? "<absent>"), "
                     + "CFBundleShortVersionString = \(finalInstalledVersion ?? "<absent>")")
 
+        // MARK: Backup retention (BACKUP RETENTION v1) — the ONLY pruner call
+        // site in the file. Reaching here means the chain is fully green
+        // (postScan passed; nothing aborted), the backup step produced its
+        // BackupReceipt earlier, so the just-created zip competes in the
+        // newest-first order. Every earlier `return done()` above is an
+        // aborted or refused apply where the store is intentionally LEFT
+        // UNTOUCHED (refusals never prune). Hygiene only: the prune is wrapped
+        // so no error can ever escape — a failure degrades to the note, never
+        // to changed receipts, abort state or exit semantics.
+        if let keep = retentionKeep {
+            do {
+                let deleted = try await backupManager.keepLatest(keep, in: backupsRoot)
+                // Honest residue count for the note: the store may have held
+                // FEWER zips than the keep quota (nothing to prune, "kept 3"
+                // would have been a fabrication); classification reuses
+                // Backup's own managed-name policy, not a re-implementation.
+                let kept = Self.managedBackupCount(in: backupsRoot)
+                retentionNote = "kept \(kept) newest backups (retention v1 = \(keep); pruned \(deleted.count))"
+            } catch {
+                retentionNote = "retention skipped: \(Self.describe(error))"
+            }
+        }
+
         return done()
     }
 
@@ -303,5 +366,54 @@ public struct InstallCoordinator: Sendable {
     private static func describe(_ error: Error) -> String {
         if let installer = error as? InstallerError { return installer.description }
         return String(describing: error)
+    }
+
+    /// BACKUP RETENTION v1 gate (decision 2026-10-26, coordinator): `nil` keeps
+    /// retention fully disabled; `>= 1` keeps that many newest managed backup
+    /// zips. Values < 1 are a PROGRAMMER error — a keep of 0 would direct the
+    /// pruner at every backup including the one just created — so construction
+    /// fails fast here via `precondition` (preconditionFailure at init). This
+    /// is the DOCUMENTED choice per the decision record: chosen over a silent
+    /// clamp-to-1, which would let a misconfigured policy masquerade as a
+    /// working one instead of surfacing the defect to its author.
+    private static func validateRetentionKeep(_ retentionKeep: Int?) {
+        guard let keep = retentionKeep else { return }
+        precondition(
+            keep >= 1,
+            "InstallCoordinator(retentionKeep:) must be nil (retention disabled) or >= 1, "
+                + "got \(keep): keep < 1 would prune every backup including the one just "
+                + "created (programmer error, rejected at init)")
+    }
+
+    /// Store-wide count of MANAGED backup zips right now — used ONLY for the
+    /// honest residue number in the retention note (post-prune; the store may
+    /// have held fewer zips than the keep quota). Name classification is
+    /// Backup's OWN internal token policy (`managedTimestampToken`, same-module
+    /// reuse — never re-implemented here), excluding foreign/loose files
+    /// exactly as `keepLatest` excludes them. An unreadable root counts 0.
+    private static func managedBackupCount(in backupsRoot: URL) -> Int {
+        let fm = FileManager.default
+        var count = 0
+        guard let folders = try? fm.contentsOfDirectory(
+            at: backupsRoot, includingPropertiesForKeys: nil, options: []) else { return 0 }
+        for folder in folders {
+            var folderIsDirectory: ObjCBool = false
+            guard fm.fileExists(
+                    atPath: folder.path(percentEncoded: false), isDirectory: &folderIsDirectory),
+                  folderIsDirectory.boolValue,
+                  let entries = try? fm.contentsOfDirectory(
+                    at: folder, includingPropertiesForKeys: nil, options: [])
+            else { continue }
+            for entry in entries {
+                var entryIsDirectory: ObjCBool = false
+                if BackupManager.managedTimestampToken(ofFileName: entry.lastPathComponent) != nil,
+                   fm.fileExists(
+                       atPath: entry.path(percentEncoded: false), isDirectory: &entryIsDirectory),
+                   !entryIsDirectory.boolValue {
+                    count += 1
+                }
+            }
+        }
+        return count
     }
 }
