@@ -11,6 +11,7 @@
 // candidate to try, so the outcome is nil rather than a weaker guess.
 
 import Foundation
+import os
 
 /// Fetches newest-version info for an installed app from the public Homebrew
 /// cask JSON API.
@@ -25,6 +26,20 @@ import Foundation
 ///    ".app" ignored). A mismatch is a DIFFERENT app — return nil, never a
 ///    misattributed update.
 ///
+/// Alias fallback (locked coordinator decision, 2026-10-26): if step 2's
+/// endpoint answers HTTP 404 for the derived token AND `CaskAliases.table`
+/// carries that token, the aliased token is fetched and validated ONCE — the
+/// identical pipeline (same decode, same version check, same artifact match)
+/// as the primary attempt, so an alias can surface nothing the primary path
+/// couldn't. The fallback is deliberately failure-driven, never a pre-emptive
+/// rewrite of the token: a correctly derived token wins without a second
+/// fetch, and the substitution is logged when it happens
+/// (os.Logger, category "cask"). HTTP 404 is the only trigger — network
+/// errors, other statuses, and validation failures get no alias retry (their
+/// honest-nil is final), which keeps "the token does not exist" distinct from
+/// "the endpoint is unhappy" and bounds the worst case to one extra request.
+/// A token that is unknown to the table stays an honest miss with no retry.
+///
 /// Failure semantics (documented design): network failure, non-200 status,
 /// malformed/undecodable JSON, and a document without a usable `version` all
 /// yield `nil` = "no verifiable update info from this source". The declared
@@ -32,6 +47,11 @@ import Foundation
 /// rethrows through it. No version is ever synthesized.
 public struct CaskSource: UpdateSource, Sendable {
     public static var kind: SourceKind { .cask }
+
+    /// Log surface: os.Logger subsystem "io.appupdater.AppUpdater", category
+    /// "cask". Documented line: "cask token '<derived>' 404 — aliased to
+    /// '<target>'" (emitted when an alias substitution actually fires).
+    private static let log = Logger(subsystem: "io.appupdater.AppUpdater", category: "cask")
 
     private let session: URLSession
 
@@ -58,7 +78,44 @@ public struct CaskSource: UpdateSource, Sendable {
 
     public func fetchUpdateInfo(for app: InstalledApp) async throws -> UpdateInfo? {
         guard let token = CaskMatching.candidateToken(from: app.name) else { return nil }
-        guard let endpoint = endpointURL(token: token) else { return nil }
+
+        // Attempt 1 — the primary derived-token behavior, unchanged.
+        let primary = try await lookup(token: token, for: app)
+        if case .info(let info) = primary { return info }
+
+        // Attempt 2 — ONCE, and only when the primary token PROVABLY missed
+        // (HTTP 404) and the alias table carries it. Anything else honest
+        // (network failure, non-404 status, malformed JSON, missing version,
+        // artifact mismatch) concludes nil right here: those outcomes say the
+        // TOKEN EXISTS but has nothing usable for this app, and an alias must
+        // not second-guess a validation verdict.
+        guard case .notFound = primary else { return nil }
+        guard let aliased = CaskAliases.table[token], aliased != token else {
+            return nil // not in the table → no retry, honest nil stands
+        }
+        Self.log.notice(
+            "cask token '\(token, privacy: .public)' 404 — aliased to '\(aliased, privacy: .public)'"
+        )
+        let secondary = try await lookup(token: aliased, for: app)
+        if case .info(let info) = secondary { return info }
+        return nil // aliased doc also has nothing usable → honest nil
+    }
+
+    /// One token-document lookup: fetch, decode, version-check, artifact
+    /// validation — the exact pipeline shared by the primary attempt and the
+    /// alias retry.
+    private enum LookupOutcome {
+        case info(UpdateInfo)
+        /// The endpoint answered HTTP 404: the token does not exist.
+        case notFound
+        /// Every other honest nil: network failure, non-404 status,
+        /// malformed/undecodable JSON, missing/blank version, artifact
+        /// mismatch — this token has nothing to say about this app.
+        case noResult
+    }
+
+    private func lookup(token: String, for app: InstalledApp) async throws -> LookupOutcome {
+        guard let endpoint = endpointURL(token: token) else { return .noResult }
 
         var request = URLRequest(url: endpoint)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
@@ -67,29 +124,33 @@ public struct CaskSource: UpdateSource, Sendable {
         do {
             payload = try await session.data(for: request)
         } catch {
-            return nil // network failure → honest nil
+            return .noResult // network failure → honest nil
         }
 
-        guard let http = payload.response as? HTTPURLResponse, http.statusCode == 200 else {
-            return nil // 404 / other status → this source has nothing to say
+        guard let response = payload.response as? HTTPURLResponse else {
+            return .noResult // non-HTTP response → this source has nothing to say
+        }
+        if response.statusCode == 404 { return .notFound }
+        guard response.statusCode == 200 else {
+            return .noResult // 404 handled above; other statuses stay an honest nil
         }
 
         let record: CaskRecord
         do {
             record = try JSONDecoder().decode(CaskRecord.self, from: payload.data)
         } catch {
-            return nil // malformed/undecodable JSON → honest nil (design note above)
+            return .noResult // malformed/undecodable JSON → honest nil (design note above)
         }
 
         guard let version = record.version?.trimmingCharacters(in: .whitespacesAndNewlines),
               !version.isEmpty else {
-            return nil // missing/blank version → never synthesize one
+            return .noResult // missing/blank version → never synthesize one
         }
         guard CaskMatching.caskMatchesInstalledApp(record, for: app) else {
-            return nil // artifact mismatch: the cask is for a different app
+            return .noResult // artifact mismatch: the cask is for a different app
         }
 
-        return UpdateInfo(
+        return .info(UpdateInfo(
             source: .cask,
             newestShortVersion: version,
             // Cask JSON carries `bundle_version` (cask-computed CFBundleVersion), but
@@ -104,7 +165,7 @@ public struct CaskSource: UpdateSource, Sendable {
             releaseNotes: record.homepage ?? record.desc,
             confidence: .medium,
             sourceDetail: Self.sourceDetail
-        )
+        ))
     }
 
     private static let sourceDetail = "Homebrew cask metadata is public but self-attested (sha256 lives in the same unsigned JSON)."

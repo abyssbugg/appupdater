@@ -346,4 +346,217 @@ struct CaskSourceTests {
         #expect(CaskMatching.candidateToken(from: "") == nil)
         #expect(CaskMatching.candidateToken(from: "!!!") == nil)
     }
+
+    // MARK: - Cask token alias fallback (lane caskalias, 2026-10-26)
+    //
+    // CaskSource consults CaskAliases.table ONCE after the derived token
+    // provably 404s. All behavior under test here is hermetic: the stub
+    // answers 404 for any unregistered token, 200 + body for registered ones.
+    // The LIVE verification of every alias TABLE entry happened separately
+    // in the worktree session (single-cask fetches, see CaskAliases header);
+    // nothing here touches the network.
+    //
+    // Fixtures below are trimmed but true-to-shape, taken from the LIVE docs
+    // fetched 2026-10-26: /tmp/lanecask_verify/chrome_google-chrome.json and
+    // /tmp/lanecask_verify/code_visual-studio-code.json (values like
+    // google-chrome's sha256 "no_check" are the real live values).
+
+    private let chromeAliasJSON = """
+    {
+      "token": "google-chrome",
+      "name": ["Google Chrome"],
+      "desc": "Web browser",
+      "homepage": "https://www.google.com/chrome/",
+      "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+      "version": "156.0.8078.48",
+      "sha256": "no_check",
+      "artifacts": [
+        {"app": ["Google Chrome.app"], "target": "/Applications/Google Chrome.app"}
+      ],
+      "depends_on": {"macos": {}},
+      "variations": {},
+      "generated_date": "2026-10-26"
+    }
+    """
+
+    private let vscodeAliasJSON = """
+    {
+      "token": "visual-studio-code",
+      "name": ["Microsoft Visual Studio Code", "VS Code"],
+      "desc": "Open-source code editor",
+      "homepage": "https://code.visualstudio.com/",
+      "url": "https://update.code.visualstudio.com/1.143.1/darwin-arm64/stable",
+      "version": "1.143.1",
+      "sha256": "65ced7020e995c296e121881b10cd7ba46638cebc5dde0cb921bc82de13cd772",
+      "artifacts": [
+        {"app": ["Visual Studio Code.app"], "target": "/Applications/Visual Studio Code.app"}
+      ],
+      "depends_on": {"macos": {}},
+      "generated_date": "2026-10-26"
+    }
+    """
+
+    // Test-side copy of the declared table — used by the freeze test so any
+    // value/entry drift in the source literal fails loudly.
+    private let aliasTableDeclared: [String: String] = [
+        "chrome": "google-chrome",
+        "code": "visual-studio-code",
+        "brave": "brave-browser",
+        "ollama": "ollama-app",
+        "github-copilot": "github-copilot-app",
+        "signal-beta": "signal@beta",
+        "cline": "cline-app",
+        "t3-code-nightly": "t3-code@nightly",
+        "manus-studio": "manus",
+        "amp": "amp-app",
+        "cue": "manus-cue",
+        "hermes": "hermes-desktop",
+        "devin": "devin-desktop",
+        "cleanmymac-5-cli": "cleanmymac-cli",
+    ]
+
+    // (10) 404 on the derived token + alias table hit → the aliased token is
+    // fetched second, in order, and the resolved claim comes from THE ALIASED
+    // token's document (version/sha256/url are google-chrome's).
+    @Test func aliasFallbackRetriesAliasedTokenOn404() async {
+        StubURLProtocol.reset()
+        StubURLProtocol.stub(chromeAliasJSON, forToken: "google-chrome") // "chrome" stays unregistered → 404
+        let source = makeSource()
+        let app = makeApp(name: "Chrome", path: "/Applications/Google Chrome.app", bundleIdentifier: "com.google.Chrome")
+
+        do {
+            let info = try await source.fetchUpdateInfo(for: app)
+            guard let info else {
+                Issue.record("expected aliased UpdateInfo, got nil")
+                return
+            }
+            #expect(info.source == .cask)
+            #expect(info.newestShortVersion == "156.0.8078.48")
+            #expect(info.sha256Hex == "no_check")
+            #expect(info.downloadURL?.absoluteString == "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg")
+
+            // Request log: primary miss FIRST, aliased retry SECOND — one retry only.
+            let requests = StubURLProtocol.recordedRequests
+            #expect(requests.count == 2)
+            #expect(requests.map { $0.url.absoluteString } == [
+                "https://formulae.brew.sh/api/cask/chrome.json",
+                "https://formulae.brew.sh/api/cask/google-chrome.json",
+            ])
+            // The identifying User-Agent travels on both attempt families.
+            #expect(requests.allSatisfy { $0.userAgent == "AppUpdater/0.1 (macOS)" })
+        } catch {
+            Issue.record("fetchUpdateInfo threw unexpectedly: \(error)")
+        }
+    }
+
+    // (11) Second verified pair: the claim genuinely rides on the aliased
+    // document (version/sha/url are visual-studio-code's — different values
+    // than any chrome-family document could supply).
+    @Test func aliasResolvesVisualStudioCodeClaim() async {
+        StubURLProtocol.reset()
+        StubURLProtocol.stub(vscodeAliasJSON, forToken: "visual-studio-code") // "code" → 404
+        let source = makeSource()
+        let app = makeApp(name: "Code", path: "/Applications/Visual Studio Code.app", bundleIdentifier: "com.microsoft.VSCode")
+
+        do {
+            let info = try await source.fetchUpdateInfo(for: app)
+            guard let info else {
+                Issue.record("expected aliased UpdateInfo for VS Code, got nil")
+                return
+            }
+            #expect(info.newestShortVersion == "1.143.1")
+            #expect(info.sha256Hex == "65ced7020e995c296e121881b10cd7ba46638cebc5dde0cb921bc82de13cd772")
+            #expect(info.downloadURL?.absoluteString == "https://update.code.visualstudio.com/1.143.1/darwin-arm64/stable")
+            #expect(info.releaseNotes == "https://code.visualstudio.com/")
+
+            let requests = StubURLProtocol.recordedRequests
+            #expect(requests.count == 2)
+            #expect(requests.map { $0.url.absoluteString } == [
+                "https://formulae.brew.sh/api/cask/code.json",
+                "https://formulae.brew.sh/api/cask/visual-studio-code.json",
+            ])
+        } catch {
+            Issue.record("fetchUpdateInfo threw unexpectedly: \(error)")
+        }
+    }
+
+    // (12) A derived token that is NOT in the alias table gets NO retry: one
+    // request, honest nil, verdict unchanged.
+    @Test func tokenNotInAliasTableGetsNoRetry() async {
+        StubURLProtocol.reset() // nothing registered → 404 everywhere
+        let source = makeSource()
+        let app = makeApp(name: "No Such App", path: "/Applications/No-such.app", bundleIdentifier: "org.example.missing")
+
+        do {
+            let info = try await source.fetchUpdateInfo(for: app)
+            #expect(info == nil) // honest failure verdict unchanged
+            let requests = StubURLProtocol.recordedRequests
+            #expect(requests.count == 1) // primary only; no second fetch
+            #expect(requests.first?.url.absoluteString == "https://formulae.brew.sh/api/cask/no-such-app.json")
+        } catch {
+            Issue.record("fetchUpdateInfo threw unexpectedly: \(error)")
+        }
+    }
+
+    // (13) The fallback is failure-DRIVEN: when the primary derived token
+    // itself succeeds, the table entry must not preempt it — exactly one
+    // fetch, no aliased request, no substitution.
+    @Test func aliasDoesNotFireWhenPrimaryTokenSucceeds() async {
+        StubURLProtocol.reset()
+        StubURLProtocol.stub(chromeAliasJSON, forToken: "chrome") // derived token EXISTS here
+        let source = makeSource()
+        let app = makeApp(name: "Chrome", path: "/Applications/Google Chrome.app", bundleIdentifier: "com.google.Chrome")
+
+        do {
+            let info = try await source.fetchUpdateInfo(for: app)
+            #expect(info?.newestShortVersion == "156.0.8078.48") // the primary document's claim
+            let requests = StubURLProtocol.recordedRequests
+            #expect(requests.count == 1) // no aliased second fetch
+            #expect(requests.first?.url.absoluteString == "https://formulae.brew.sh/api/cask/chrome.json")
+        } catch {
+            Issue.record("fetchUpdateInfo threw unexpectedly: \(error)")
+        }
+    }
+
+    // (14) An alias can never defeat validation: google-chrome's document is
+    // served under the aliased token, but its app artifact is for a DIFFERENT
+    // app → both attempts conclude nil. Verdict unchanged, no misattribution.
+    @Test func aliasedDocumentThatDoesNotValidateStaysNil() async {
+        StubURLProtocol.reset()
+        StubURLProtocol.stub(firefoxJSON, forToken: "google-chrome") // wrong app's body under the aliased token
+        let source = makeSource()
+        let app = makeApp(name: "Chrome", path: "/Applications/Google Chrome.app", bundleIdentifier: "com.google.Chrome")
+
+        do {
+            let info = try await source.fetchUpdateInfo(for: app)
+            #expect(info == nil)
+            // Both the primary and the aliased fetch happened before the verdict.
+            let requests = StubURLProtocol.recordedRequests
+            #expect(requests.count == 2)
+        } catch {
+            Issue.record("fetchUpdateInfo threw unexpectedly: \(error)")
+        }
+    }
+
+    // (15) Table freeze: the REQUIRED entry exists; the table matches the
+    // declared pairings exactly. Duplicate keys in a dictionary literal
+    // collapse SILENTLY (verified live: Swift emits only a warning, keeping
+    // the last value — `swiftc` check, 2026-10-26), so the exact-content pin
+    // is the loud guard against future copy-paste dupes.
+    @Test func aliasTableFreeze() {
+        // Documented required entry for this lane.
+        #expect(CaskAliases.table["chrome"] == "google-chrome")
+
+        // Exact content (count + every pairing as declared).
+        #expect(CaskAliases.table == aliasTableDeclared)
+        #expect(CaskAliases.table.count == 14)
+
+        // Meta sanity per entry: an alias always maps a token to a DIFFERENT
+        // token, and every target builds a fetchable single-cask URL
+        // (exercises the "@" tokens, e.g. signal@beta / t3-code@nightly).
+        for (derived, target) in CaskAliases.table {
+            #expect(derived != target)
+            #expect(URL(string: "https://formulae.brew.sh/api/cask/\(target).json") != nil)
+        }
+    }
 }
