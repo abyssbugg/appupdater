@@ -11,22 +11,32 @@ import AppUpdaterCore
 //       per-app report with candidates, failures, and the resolved verdict (or its
 //       honest absence). NEVER synthesizes an update claim.
 //
-//   appupdater-cli install [--apps NAME] [--out FILE] [--apply]
-//       Resolves the newest claim for the named app and prints/plrcodes an INSTALL PLAN.
+//   appupdater-cli install [--apps NAME] [--out FILE] [--apply] [--relaunch]
+//       Resolves the newest claim for the named app and prints an INSTALL PLAN.
 //       WITHOUT --apply this is a dry-run: pure data, nothing downloads or moves.
-//       --apply is only honored when the built binary has executor wiring; otherwise it
-//       exits 3 with an honest "not wired" note. NEVER prints a fake "installed".
+//       WITH --apply the executor chain runs for real (download → independent
+//       sha256/magic verify → backup → graceful quit → deploy → atomic swap →
+//       postScan). Refusals (no claim / security floor) exit 3 before anything
+//       is touched; an aborted step exits 1 with the full receipt chain.
+//       Applying is strictly per-app (exactly one --apps match) and is the
+//       user's explicit action — the CLI never batches silently. --relaunch
+//       additionally asks LaunchServices to open the swapped bundle.
 //
 // Output: JSON on stdout (or a file via --out). Exit codes: 0 ok, 2 usage error,
 // 3 honest-refusal (not wired / plan rejected), 1 failure.
 
 private let usage = """
 USAGE:
-  appupdater-cli scan  [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
-  appupdater-cli check [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
+  appupdater-cli scan    [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
+  appupdater-cli check   [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
+  appupdater-cli install [--apps NAME] --out FILE [--apply] [--relaunch]
 
-scan : enumerate installed apps (no network).
-check: scan + live source lookups (cask > sparkle > mas precedence).
+scan   : enumerate installed apps (no network).
+check  : scan + live source lookups (cask > sparkle > mas precedence).
+install: dry-run install PLAN per --apps (one app for --apply; refusals are
+         honest: exit 3, nothing touched). --apply executes the plan for real
+         with receipts; exit 0 = applied, 1 = aborted (see outcome.abortedStep),
+         3 = plan refused (security floor / no claim), 2 = usage/target error.
 --out FILE writes the JSON there instead of stdout (parent dir must exist).
 """
 
@@ -39,6 +49,7 @@ struct CliMain {
         var nameFilters: [String] = []
         var outFile: String?
         var applyRequested = false
+        var relaunchRequested = false
         var positionalModeCount = 0
 
         var index = 0
@@ -69,6 +80,8 @@ struct CliMain {
                 outFile = arguments[index]
             case "--apply":
                 applyRequested = true
+            case "--relaunch":
+                relaunchRequested = true
             case "-h", "--help":
                 print(usage)
                 exit(0)
@@ -112,12 +125,63 @@ struct CliMain {
                 return
             }
 
-            // mode == "install": planner-driven dry-run (or labeled refusal for apply).
+            // mode == "install".
             if applyRequested {
-                FileHandle.standardError.write(
-                    "refusal: --apply executor wiring lands with the Phase-3 lane merge; this binary can PLAN only. dry-run (no --apply) is available now.\n".data(using: .utf8)!
-                )
-                exit(3)
+                // APPLY — strictly one target, claim-gated, security-floored.
+                // Refusal paths touch NOTHING: staging/backups dirs are only
+                // created after the plan is accepted.
+                guard apps.count == 1, let target = apps.first else {
+                    let matched = apps.map { $0.name }.joined(separator: ", ")
+                    let listing = matched.isEmpty ? "" : ": \(matched)"
+                    FileHandle.standardError.write(
+                        "install target discipline: the filter must match exactly ONE installed app (matched \(apps.count)\(listing)).\n"
+                            .data(using: .utf8)!)
+                    exit(2)
+                }
+                guard let check = checks.first else {
+                    FileHandle.standardError.write("install refused: nothing was checked\n".data(using: .utf8)!)
+                    exit(1)
+                }
+                guard check.verdict == "update", let update = check.resolved else {
+                    FileHandle.standardError.write(
+                        "install refused: no newer claim to install (verdict '\(check.verdict)') — never installs from a missing or non-newer claim.\n"
+                            .data(using: .utf8)!)
+                    exit(3)
+                }
+                let plan: InstallPlan
+                do {
+                    plan = try InstallPlanner().plan(app: target, update: update)
+                } catch {
+                    FileHandle.standardError.write(
+                        "install refused (plan rejected: \(error)) — nothing was touched.\n"
+                            .data(using: .utf8)!)
+                    exit(3)
+                }
+
+                let fm = FileManager.default
+                let appSupport = fm.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Application Support/AppUpdater", isDirectory: true)
+                let stagingRoot = appSupport.appendingPathComponent("staging", isDirectory: true)
+                let backupsRoot = appSupport.appendingPathComponent("backups", isDirectory: true)
+                try? fm.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+                try? fm.createDirectory(at: backupsRoot, withIntermediateDirectories: true)
+
+                let coordinator = InstallCoordinator()
+                let outcome = await coordinator.run(
+                    plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot,
+                    relaunchRequested: relaunchRequested)
+
+                try emit(InstallApplyReport(
+                    mode: "install-apply",
+                    applied: outcome.abortedStep == nil,
+                    outcome: outcome), outFile)
+
+                // Exit policy: a failed relaunch is auxiliary — the swap itself
+                // succeeded; everything else aborts with 1.
+                if let aborted = outcome.abortedStep, aborted != .relaunch {
+                    exit(1)
+                }
+                return
             }
             let planner = InstallPlanner()
             var entries: [InstallPlanEntry] = []
@@ -196,8 +260,9 @@ struct CheckReport: Codable {
     var apps: [UpdateCheck]
 }
 
-/// Install-mode report: per-app PLAN data (dry-run) or labeled refusals.
-/// `applied` is always false until the executor wiring is real — never fake success.
+/// Install-mode dry-run report: per-app PLAN data with labeled absent claims.
+/// The dry-run path always emits `applied: false` — a plan is data, nothing
+/// downloaded or moved. The APPLY path emits `InstallApplyReport` instead.
 struct InstallPlanEntry: Codable, Hashable {
     var app: ScanAppSummary
     var update: UpdateInfo?
@@ -217,6 +282,14 @@ struct InstallPlanReport: Codable {
     var count: Int
     var apps: [InstallPlanEntry]
     var applied: Bool
+}
+
+/// The `install --apply` outcome envelope: full receipt chain + abort state.
+/// `applied` mirrors `outcome.abortedStep == nil` (redundant, machine-friendly).
+struct InstallApplyReport: Codable {
+    var mode: String
+    var applied: Bool
+    var outcome: InstallOutcome
 }
 
 // MARK: - Encoder policy (deterministic reports)

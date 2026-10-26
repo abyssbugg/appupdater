@@ -5,6 +5,21 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-26 — Phase 3 (Installer) COMPLETE — coordinator wiring + real-disk end-to-end green
+
+**Confirmed (live evidence, this session):**
+1. **4 parallel lanes merged sequentially** into main: download `79f8f8a` / backup `146299f` / deploy `a10cc38` / quitlaunch `8207142` (lane commits `8813768`, `35b3f5f`, `6eeb8e7`, `e8bfde4`); union gate on main before coordinator wiring: build 0 + 129 tests / 12 suites.
+2. **Coordinator wiring executed at merge (lane J, main repo):** frozen `InstallModels` shapes unchanged (no lane needed a contract change) · `InstallCoordinator` composes the four executors into the locked 9-step order with receipts + abort-at-first-failure, adds the INDEPENDENT sha256 re-verify (`Checksum.sha256Hex` — second opinion over staged bytes), independent zip-magic re-check, old-copy Trash disposition (default `trashItem`, injectable; failed disposition is recorded, never downgrades a green swap), per-apply `apply-<uuid>` staging workspace removed on every outcome (backupsRoot never touched by cleanup), postScan = direct Info.plist read + finalInstalledShortVersion.
+3. **CLI `install` went truthful-everywhere:** dry-run plans (Ghostty live → real 9-step dmg plan, `applied:false`); `--apply` now runs the REAL executor chain for exactly one --apps match (`--relaunch` opt-in); refusal exits (no claim → 3, plan rejected/floor → 3, target discipline → 2) touch NOTHING — `~/Library/Application Support/AppUpdater` verified absent after refusal runs. Real-app applies remain owner-run only.
+4. **Full gate on merged main: 137 tests / 13 suites exit 0** (coordinator tests: real-disk zip + dmg end-to-end v1→v2, byte-equal backup restore round-trip, injected-disposition recorded old copy, post-download-mutation caught by independent verify, identity-hijack refusal preserving v1 with retained green receipts, quit-timeout abort before deploy, relaunch opener called exactly once at the victim path, InstallOutcome Codable round-trip; no `/Applications` contact, no real-Trash contact, dmg test asserts the `.dmgmount-` prefix in no `hdiutil info` line).
+5. **Bundle/sign/launch gate:** `make-app.sh release` assembled; `codesign -v --strict` OK; `plutil -lint` OK; app launched live + cleanly quit; 0 crash reports.
+6. Banked gotchas: `FileManager.trashItem` needs `NSURL?` inout (URL? fails); binary HTTP fixtures need a Data-native URLProtocol (String-based stubs corrupt dmg bytes); ternary loses contextual `@MainActor @Sendable` in Swift 6.4 (assign by explicit branches) — all in AGENTS.md ledger.
+7. Honest notes: backup retention (`keepLatest`) landed but is deliberately NOT wired into apply (Phase 4 product decision — no silent backup deletion); postScan failing on a green swap still aborts AT postScan (verification wouldn't vouch — receipts show both truths).
+
+**Phase 3 status: DONE and verified.** Next: Phase 4 lanes (scheduler / ignore-rules + list store / menu-bar live data / window list UI) after the coordinator commits the frozen `Model/ScheduleStore.swift` contract.
+
+---
+
 ## 2026-10-26 — Phase 2 (Scanner + SourceStrategy) COMPLETE — engine + CLI gate green
 
 **Confirmed (live evidence, this session):**

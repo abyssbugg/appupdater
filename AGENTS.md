@@ -104,20 +104,23 @@ Point at files that exist. A missing doc is a gap to flag, not a file to invent 
 
 ## Verification gate
 
-The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-26, Phase 2 close).**
+The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-26, Phase 3 close).**
 
 ```
-swift build                                    # PROVEN exit=0 (Phase 2 integration)
-swift test                                     # PROVEN 82 tests / 7 suites, exit=0
+swift build                                    # PROVEN exit=0 (Phase 3 close)
+swift test                                     # PROVEN 137 tests / 13 suites, exit=0
 Scripts/make-app.sh release                    # PROVEN "Assembled: build/AppUpdater.app"
 codesign -v --strict build/AppUpdater.app      # PROVEN OK (adhoc)
 plutil -lint build/AppUpdater.app/Contents/Info.plist   # PROVEN OK
-launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN cleanup path ran, zero crash reports, clean quit
-swift run appupdater-cli scan                  # PROVEN 82 apps inventoried from real /Applications (docs/evidence/phase2-scan.json)
-swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROVEN honest verdicts incl. update/current/unknown mix (docs/evidence/phase2-check.json)
+launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN launch observed + clean quit, 0 crash reports
+swift run appupdater-cli scan                  # PROVEN 82 apps inventoried from real /Applications (docs/evidence/phase3-scan.json)
+swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROVEN honest verdicts (Ghostty=update, MacUpdater=current, AdGuard/Chrome=unknown) (docs/evidence/phase3-check.json)
+swift run appupdater-cli install --apps Ghostty --out docs/evidence/phase3-installplan.json   # PROVEN real 9-step dmg plan, applied:false (dry-run)
+swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest refusal exit=3, nothing touched; --apps DoesNotExist123 --apply → exit=2; ~/Library/Application Support/AppUpdater verified ABSENT after both (refusals create nothing)
 ```
 
 - swiftlint is still NOT installed (`brew install swiftlint` pending) — that gate line stays unverified and is treated as debt, not skipped silently.
+- `install --apply` on a REAL app with an accepted plan is the owner-run destructive boundary: the autonomous gate proves refusal paths + dry-run only; full apply execution is proven in hermetic real-disk fixture tests (`InstallCoordinatorTests`, temp workspaces, never /Applications, user's real Trash never touched).
 - A change is done when every line of this gate has evidence from this session. Anything skipped is **unverified**.
 
 ---
@@ -125,6 +128,9 @@ swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROV
 ## Gotcha ledger (read before touching the matching area)
 
 ```
+- **`FileManager.trashItem` takes an `NSURL?` inout on this SDK** — `URL?` fails with "cannot convert value of type 'URL?' to expected argument type 'NSURL?'". Fix: `var destination: NSURL?` then `(destination as URL?)?.path`. Evidence: Phase 3 close, `InstallCoordinator.trashDisposition`.
+- **Binary HTTP fixtures need a Data-native URLProtocol** — String-based stubs (like IntegrationTests') round-trip arbitrary bytes through UTF-8 and silently corrupt dmg payloads; anything binary must stub `Data` bodies + Content-Length directly. Evidence-by-design: `ApplyStubURLProtocol` in `InstallCoordinatorTests.swift` (Phase 3 close).
+- **Ternary loses contextual `@MainActor @Sendable` in Swift 6.4** — `let f: T = cond ? closureA : closureB` fails with "converting non-Sendable function value". Fix: declare the constant, assign by explicit branches so each literal gets the declared type. Evidence: `fakeTerminator` in `InstallCoordinatorTests.swift` (Phase 3 close).
 - **SwiftPM error output on Xcode 27-beta** — the real diagnostic hides under a giant "Failed frontend command" echo; `tail`/pipe truncation loses it. Symptom: build "fails" with no visible error line, repeated confusion. Fix: `swift build > log 2>&1; grep "error:" log`. Evidence: Phase 1 debugging round-trip.
 - **XCTest discovery broken on this toolchain** — Xcode 27.0 beta / Swift 6.4: `swift test` logs "Test Suite passed" with **0 tests collected**; exit code lies green. Symptom: silent gap in coverage. Fix: write tests with Swift Testing (`import Testing`, `@Test`, `#expect`) and require a nonzero test count in gate output; also note Swift Testing does not re-export Foundation (tests need their own `import Foundation`). Evidence: `/tmp`-captured logs Phase 1; `Tests/AppUpdaterCoreTests/ScaffoldSanityTests.swift`.
 - **Cross-surface edits in the app shell** — `AppUpdaterApp.swift` (scenes) and view/state files drift silently: removing `AppState.requestMainWindow()` while the scene still called it produced a misleading key-path error (`has no dynamic member … using key path`), NOT a "missing function" error. Fix: after changing AppState's surface, grep the app target for stale call sites; prefer `@Environment(\.openWindow)` + `openWindow(id:)` over any notification relay for menu-bar → main-window opening (macOS 15). Evidence: `Sources/AppUpdaterApp/AppUpdaterApp.swift`.
@@ -140,9 +146,11 @@ swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROV
 
 ## Current open items
 
-- [x] **Phase 2 (Scanner + SourceStrategy) — DONE** 2026-10-26: 5 parallel lanes merged (`lane/version/scanner/cask/sparkle/mas`), comparator swap to VersionOracle complete, `UpdateCheckEngine` + `appupdater-cli` built, 82 tests / 7 suites green, live `/Applications` gate runs evidenced under `docs/evidence/phase2-*.json`.
+- [x] **Phase 3 (Installer) — DONE** 2026-10-26: 4 lanes (`download/backup/deploy/quitlaunch`) merged + coordinator wiring (`InstallPlanner` pure planner, `InstallCoordinator` executor composition, CLI `install` dry-run + honest `--apply`), 137 tests / 13 suites green, real-disk end-to-end (zip + dmg, backup round-trip, hijack refusal, no leftover mounts), live CLI refusals evidenced. Details + evidence: BUILD-PLAN Phase 3 block, `docs/evidence/phase3-*.json`.
+- [ ] **Phase 4 (Scheduler + UI)** — OPENED: 4 lanes (scheduler / ignore-rules store / menu-bar live data / window list UI) per BUILD-PLAN, after `Model/ScheduleStore.swift` frozen contract is committed by the coordinator.
 - [ ] **Cask alias table (token mapping)** — name-derived token missed `chrome`→`google-chrome` (honest unknown in the evidence run). MacUpdater-style token/bundle-id alias map is the correct later-phase work; whole-index fetch deferred per Lane B decision.
 - [ ] **Non-default Sparkle channels (beta/nightly)** — currently only the default channel is honored (AdGuard nightly correctly shows unknown). Opt-in UI for channel policy comes with the Phase 4 UI work.
+- [ ] **Backup retention wiring** — `keepLatest(_:)` exists (lane backup) but is NOT wired into the apply flow: retention policy (default N, owner-visible) belongs with the Phase 4 scheduler product decisions; nothing deletes backups silently today.
 - [x] **Stack freeze** — Swift 6.4 / Xcode 27 / SwiftPM / Sparkle 2 / SwiftUI+AppKit shell / deployment target **macOS 15.0**. Owner sign-off 2026-10-26 (LOCKED decision 8).
 - [x] **Canonical remote** — `abyssbugg/appupdater` private repo created + pushed 2026-10-26 (LOCKED table above).
 - [x] **v1 source set** — cask JSON index + app's own Sparkle appcast + MAS (iTunes lookup) + GitHub optional-flag; Electron/scrape deferred. Evidence: live samples in `docs/evidence/`.

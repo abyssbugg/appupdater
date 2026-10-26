@@ -31,21 +31,26 @@ Lanes (parallel, DONE):
 - ✅ **Integration** — `Sources/AppUpdaterCore/Engine/UpdateCheckEngine.swift` + `Sources/appupdater-cli/` + `Tests/AppUpdaterCoreTests/IntegrationTests.swift`
 Deferred (tracked in AGENTS.md open items): cask token alias table (chrome→google-chrome), non-default Sparkle channels opt-in.
 
-## Phase 3 — Installer (plain user-space, atomic swap)
-Gate: dry-run mode executes a REAL low-risk update end-to-end on the dev machine; backup verified
-Split (dry-run/apply is a hard interface from day 1):
-- ✅ **Frozen interchange types** — `Sources/AppUpdaterCore/Installer/InstallModels.swift` (InstallKind/Step/Plan/Receipts/Outcome + honest error domain), coordinator-owned
-- **F. Download+Verify** (lane/download — in flight): `Installer/Download.swift` + `Checksum.swift` — HTTPS-only, streaming sha256, zip magic, sha-less refusal (EdDSA is Phase 5's)
-- **G. Backup** (lane/backup — in flight): `Installer/Backup.swift` — ditto ZIP with integrity verification + retention + restore hint
-- **H. Deploy+Swap** (lane/deploy — in flight): `Installer/Deploy.swift` + `JMSU.swift` — hdiutil/ditto deploy, JMSU-style atomic swap: perms-movable → bundle-id identity guard → mtime preserve → move-old-aside rename → move-new-in → rollback on failure; quarantined xattr release documented
-- **I. Quit+Relaunch** (lane/quitlaunch — in flight): `Installer/AppQuit.swift` — graceful terminate with provider seams, force-kill never silent, relaunch via NSWorkspace
-- **J. Coordinator** (lane = main repo): `Installer/InstallPlanner.swift` (pure; DONE, committed: step order, security-floor refusals, downgrade/MAS/low-confidence warnings — 9 planner tests) + `Installer/InstallCoordinator.swift` (wired at merge) + CLI `install` mode (dry-run live NOW; `--apply` refuses with exit 3 until executor wiring) + real-disk end-to-end integration tests
-Real-world destructive boundary (owner-decision note): applying to REAL third-party apps requires the user to run `install --apply` themselves per app; no automation does it silently.
+## Phase 3 — Installer (plain user-space, atomic swap) — ✅ DONE (2026-10-26, all gates proven)
+Gate status: dry-run plan + honest-refusal CLI verified live on the dev machine; the FULL apply path
+(download → verify×2 → backup → quit → deploy → swap → postScan) proven end-to-end on REAL disk in
+hermetic fixture workspaces (backup byte-equal round-trip, identity-hijack refusal, no leftover
+mounts) — applying to real third-party apps stays an explicit owner CLI action.
+- ✅ **Frozen interchange types** — `Installer/InstallModels.swift` (coordinator-owned): InstallKind / InstallStep (9 locked) / InstallPlan / StepReceipt / InstallOutcome / BackupReceipt / DownloadedUpdate / DeployedBundle + honest `InstallerError`.
+- ✅ **F. Download+Verify** (`Installer/Download.swift` 221L + `Checksum.swift`): HTTPS-only, hash-while-write (1 MiB chunks), Content-Length cross-check, zip PK magic, sha-less refusal = documented MISSing-EdDSA boundary (Phase 5).
+- ✅ **G. Backup** (`Installer/Backup.swift`): ditto ZIP `<backupsRoot>/<sanitizedBundleID>/<isotoken>-<name>.zip`, same-second collision suffixes, unzip -l listing verification + byte-size checks, `keepLatest(_:)` name-token retention, restoreHint.
+- ✅ **H. Deploy+Swap** (`Installer/Deploy.swift` + `JMSU.swift`): zip ditto-extract / dmg hdiutil attach→ditto-out→detach-on-every-path; JMSU swap with documented divergences (no chown [root-only], probe-first quarantine release, root-mtime preservation, old copy retained at `~~~appupdater-old~~~`); identity-hijack guard BEFORE any rename; hard rollback on move-in failure.
+- ✅ **I. Quit+Relaunch** (`Installer/AppQuit.swift`): `RunningRef` value seams (NSRunningApplication never crosses a seam), graceful-only terminate + absence poll (200 ms), timeout is the honest error, relaunch via NSWorkspace.openApplication; force escalation documented as a Phase-7 lane topic.
+- ✅ **J. Coordinator** (`Installer/InstallPlanner.swift` pure + `Installer/InstallCoordinator.swift` + `Tests/InstallCoordinatorTests.swift`): receipts per ATTEMPTED step, abort-at-first-failure, INDEPENDENT sha256 re-verify (defense in depth), old-copy Trash disposition (injectable; default trashItem), per-apply staging workspace hygiene, postScan = direct Info.plist read; CLI `install` (dry-run plans + `--apply` real executor wiring; target discipline: exactly one --apps match; refusal exits touch nothing).
+Evidence (this session): • merged main = `79f8f8a`/`146299f`/`a10cc38`/`8207142` + lane commits `8813768`/`35b3f5f`/`6eeb8e7`/`e8bfde4` • `swift test` 137 tests / 13 suites exit 0 (incl. real-disk zip+dmg apply with dmg-mount leak assert) • live /Applications runs: `docs/evidence/phase3-scan.json` (82 apps), `phase3-check.json` (Ghostty=update, MacUpdater=current, AdGuard/Chrome=unknown), `phase3-installplan.json` (Ghostty → real 9-step dmg plan) • honest refusals: `--apply` zero-match → exit 2; current-verdict → exit 3; `~/Library/Application Support/AppUpdater` verified ABSENT after both (refusals create nothing) • bundle/sign/launch gate green.
 
-## Phase 4 — Scheduler + UI surface
+## Phase 4 — Scheduler + UI surface (OPENED 2026-10-26)
 Gate: scheduled scan triggers on timer + missed-scan catch-up; list/filter/ignore; auto-update rules
 - Idle/energy-aware scheduling; per-app/per-version ignore; menu-bar + window live data;
   notifications; distributed notification for scriptability (custom names documented).
+- Lane split (4 parallel worktree lanes per protocol §5): L1 scheduler engine (Timer/catch-up seams),
+  L2 ignore-rules + list store, L3 menu-bar live data wiring, L4 window list UI. Shared models are
+  coordinator-owned: `Model/ScheduleStore.swift` frozen contract BEFORE lanes dispatch.
 
 ## Phase 5 — Self-update (Sparkle 2)
 Gate: appcast + EdDSA-signed artifact verified by sparkle CLI; signed by available identity

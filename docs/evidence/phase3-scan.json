@@ -1,0 +1,744 @@
+{
+  "apps" : [
+    {
+      "bundleIdentifier" : "com.1password.1password",
+      "bundleVersion" : "8.12.46-17.NIGHTLY",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "1Password",
+      "path" : "\/Applications\/1Password.app",
+      "shortVersion" : "8.12.46-17.NIGHTLY"
+    },
+    {
+      "bundleIdentifier" : "com.adguard.mac.adguard",
+      "bundleVersion" : "2632",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "AdGuard",
+      "path" : "\/Applications\/Adguard.app",
+      "shortVersion" : "2.21 Nightly 1"
+    },
+    {
+      "bundleIdentifier" : "com.henrikruscon.Alcove",
+      "bundleVersion" : "203",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Alcove",
+      "path" : "\/Applications\/Alcove.app",
+      "shortVersion" : "1.7.9"
+    },
+    {
+      "bundleIdentifier" : "com.ampcode.amp.macos",
+      "bundleVersion" : "918",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Amp",
+      "path" : "\/Applications\/Amp.app",
+      "shortVersion" : "1.0"
+    },
+    {
+      "bundleIdentifier" : "com.google.antigravity",
+      "bundleVersion" : "2.26.0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Antigravity",
+      "path" : "\/Applications\/Antigravity.app",
+      "shortVersion" : "2.26.0"
+    },
+    {
+      "bundleIdentifier" : "ai.elementlabs.bionic",
+      "bundleVersion" : "1.1.9+6",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Bionic",
+      "path" : "\/Applications\/Bionic.app",
+      "shortVersion" : "1.1.9+6"
+    },
+    {
+      "bundleIdentifier" : "me.blueone.mac",
+      "bundleVersion" : "23125",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "BlueMail",
+      "path" : "\/Applications\/BlueMail.app",
+      "shortVersion" : "1.143.61"
+    },
+    {
+      "bundleIdentifier" : "com.brave.Browser",
+      "bundleVersion" : "198.60",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Brave",
+      "path" : "\/Applications\/Brave Browser.app",
+      "shortVersion" : "156.1.98.60"
+    },
+    {
+      "bundleIdentifier" : "dev.byterover.desktop",
+      "bundleVersion" : "4.2.0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "ByteRover",
+      "path" : "\/Applications\/ByteRover.app",
+      "shortVersion" : "4.2.0"
+    },
+    {
+      "bundleIdentifier" : "ai.capy.desktop",
+      "bundleVersion" : "0.5.0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Capy",
+      "path" : "\/Applications\/Capy.app",
+      "shortVersion" : "0.5.0"
+    },
+    {
+      "bundleIdentifier" : "com.google.Chrome",
+      "bundleVersion" : "8078.48",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Chrome",
+      "path" : "\/Applications\/Google Chrome.app",
+      "shortVersion" : "156.0.8078.48"
+    },
+    {
+      "bundleIdentifier" : "com.anthropic.claudefordesktop",
+      "bundleVersion" : "3.6556.2",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Claude",
+      "path" : "\/Applications\/Claude.app",
+      "shortVersion" : "3.6556.2"
+    },
+    {
+      "bundleIdentifier" : "com.macpaw.CleanMyMac5.CLI",
+      "bundleVersion" : "10000.0.2607141452",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "CleanMyMac_5_CLI",
+      "path" : "\/Applications\/CleanMyMac_5_CLI.app",
+      "shortVersion" : "1.0.0"
+    },
+    {
+      "bundleIdentifier" : "bot.cline.app",
+      "bundleVersion" : "0.0.48",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Cline",
+      "path" : "\/Applications\/Cline.app",
+      "shortVersion" : "0.0.48"
+    },
+    {
+      "bundleIdentifier" : "com.microsoft.VSCode",
+      "bundleVersion" : "1.143.1",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Code",
+      "path" : "\/Applications\/Visual Studio Code.app",
+      "shortVersion" : "1.143.1"
+    },
+    {
+      "bundleIdentifier" : "computer.cube.desktop",
+      "bundleVersion" : "0.18.0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Cube",
+      "path" : "\/Applications\/Cube.app",
+      "shortVersion" : "0.18.0"
+    },
+    {
+      "bundleIdentifier" : "ai.manus.agents",
+      "bundleVersion" : "1.1.4",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Cue",
+      "path" : "\/Applications\/Cue.app",
+      "shortVersion" : "1.1.4"
+    },
+    {
+      "bundleIdentifier" : "com.todesktop.230313mzl4w4u92",
+      "bundleVersion" : "3.27.14",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Cursor",
+      "path" : "\/Applications\/Cursor.app",
+      "shortVersion" : "3.27.14"
+    },
+    {
+      "bundleIdentifier" : "com.deepseek.dsh",
+      "bundleVersion" : "0.2.1-rc.3",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "DeepSeek Harness",
+      "path" : "\/Applications\/DeepSeek Harness.app",
+      "shortVersion" : "0.2.1-rc.3"
+    },
+    {
+      "bundleIdentifier" : "developer.apple.wwdc-Release",
+      "bundleVersion" : "1111.3.1",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Developer",
+      "path" : "\/Applications\/Developer.app",
+      "shortVersion" : "11.1.1"
+    },
+    {
+      "bundleIdentifier" : "com.exafunction.windsurf",
+      "bundleVersion" : "3.11.216",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Devin",
+      "path" : "\/Applications\/Devin.app",
+      "shortVersion" : "3.11.216"
+    },
+    {
+      "bundleIdentifier" : "com.duckduckgo.macos.browser",
+      "bundleVersion" : "845",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "DuckDuckGo",
+      "path" : "\/Applications\/DuckDuckGo.app",
+      "shortVersion" : "1.212.0"
+    },
+    {
+      "bundleIdentifier" : "com.express.vpn",
+      "bundleVersion" : "14.3.1",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "ExpressVPN",
+      "path" : "\/Applications\/ExpressVPN.app",
+      "shortVersion" : "14.3.1"
+    },
+    {
+      "bundleIdentifier" : "com.electron.factory",
+      "bundleVersion" : "14565",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Factory",
+      "path" : "\/Applications\/Factory.app",
+      "shortVersion" : "0.206.0"
+    },
+    {
+      "bundleIdentifier" : "com.figma.Desktop",
+      "bundleVersion" : "126.10.11",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Figma",
+      "path" : "\/Applications\/Figma.app",
+      "shortVersion" : "126.10.11"
+    },
+    {
+      "bundleIdentifier" : "studio.flowdeck.macos",
+      "bundleVersion" : "4126",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "FlowDeck",
+      "path" : "\/Applications\/FlowDeck.app",
+      "shortVersion" : "1.33.0"
+    },
+    {
+      "bundleIdentifier" : "com.eltima.Folx3",
+      "bundleVersion" : "14042",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Folx",
+      "path" : "\/Applications\/Folx.app",
+      "shortVersion" : "5.34"
+    },
+    {
+      "bundleIdentifier" : "com.oecoway.friendlyLite",
+      "bundleVersion" : "119",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Friendly Social",
+      "path" : "\/Applications\/Friendly Social.app",
+      "shortVersion" : "1.3.0"
+    },
+    {
+      "bundleIdentifier" : "com.google.GeminiMacOS",
+      "bundleVersion" : "1.135.1.1291",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Gemini",
+      "path" : "\/Applications\/Gemini.app",
+      "shortVersion" : "1.135.1.1291"
+    },
+    {
+      "bundleIdentifier" : "com.mitchellh.ghostty",
+      "bundleVersion" : "18413",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Ghostty",
+      "path" : "\/Applications\/Ghostty.app",
+      "shortVersion" : "0fe113a35"
+    },
+    {
+      "bundleIdentifier" : "com.github.githubapp",
+      "bundleVersion" : "1.1.32",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "GitHub Copilot",
+      "path" : "\/Applications\/GitHub Copilot.app",
+      "shortVersion" : "1.1.32"
+    },
+    {
+      "bundleIdentifier" : "app.gooeypi.desktop",
+      "bundleVersion" : "1.1.21",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "GooeyPi",
+      "path" : "\/Applications\/GooeyPi.app",
+      "shortVersion" : "1.1.21"
+    },
+    {
+      "bundleIdentifier" : "com.grammarly.ProjectLlama",
+      "bundleVersion" : "1.203.0.0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Grammarly Desktop",
+      "path" : "\/Applications\/Grammarly Desktop.app",
+      "shortVersion" : "1.203.0"
+    },
+    {
+      "bundleIdentifier" : "com.granola.app",
+      "bundleVersion" : "7.668.3",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Granola",
+      "path" : "\/Applications\/Granola.app",
+      "shortVersion" : "7.668.3"
+    },
+    {
+      "bundleIdentifier" : "com.anysphere.sand",
+      "bundleVersion" : "0.75.8",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Grok Bot",
+      "path" : "\/Applications\/Grok Bot.app",
+      "shortVersion" : "0.75.8"
+    },
+    {
+      "bundleIdentifier" : "com.nousresearch.hermes",
+      "bundleVersion" : "0.0.0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Hermes",
+      "path" : "\/Applications\/Hermes.app",
+      "shortVersion" : "0.0.0"
+    },
+    {
+      "bundleIdentifier" : "com.ridiculousfish.HexFiend",
+      "bundleVersion" : "1728795549",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Hex Fiend",
+      "path" : "\/Applications\/Hex Fiend.app",
+      "shortVersion" : "2.18.1"
+    },
+    {
+      "bundleIdentifier" : "com.cryptic-apps.hopper-web-4",
+      "bundleVersion" : "42.6316032",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Hopper Disassembler",
+      "path" : "\/Applications\/Hopper Disassembler.app",
+      "shortVersion" : "6.6.0-demo"
+    },
+    {
+      "bundleIdentifier" : "com.idmelon.pairingtool",
+      "bundleVersion" : "6",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "IDmelon Pairing Tool",
+      "path" : "\/Applications\/IDmelon Pairing Tool.app",
+      "shortVersion" : "1.1.5"
+    },
+    {
+      "bundleIdentifier" : "com.icehub.ui",
+      "bundleVersion" : "1",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "IceHub",
+      "path" : "\/Applications\/IceHub.app",
+      "shortVersion" : "1.0.0"
+    },
+    {
+      "bundleIdentifier" : "dev.kiro.desktop",
+      "bundleVersion" : "1.4.26",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Kiro",
+      "path" : "\/Applications\/Kiro.app",
+      "shortVersion" : "1.4.26"
+    },
+    {
+      "bundleIdentifier" : "com.amazon.codewhisperer",
+      "bundleVersion" : "20261023.060414",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Kiro CLI",
+      "path" : "\/Applications\/Kiro CLI.app",
+      "shortVersion" : "2.34.0"
+    },
+    {
+      "bundleIdentifier" : "com.linear",
+      "bundleVersion" : "1.32.7",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Linear",
+      "path" : "\/Applications\/Linear.app",
+      "shortVersion" : "1.32.7"
+    },
+    {
+      "bundleIdentifier" : "com.corecode.MacUpdater",
+      "bundleVersion" : "17599",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "MacUpdater",
+      "path" : "\/Applications\/MacUpdater.app",
+      "shortVersion" : "3.5.0"
+    },
+    {
+      "bundleIdentifier" : "im.manus.desktop",
+      "bundleVersion" : "2.0.11.21",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Manus Studio",
+      "path" : "\/Applications\/Manus Studio.app",
+      "shortVersion" : "2.0.11"
+    },
+    {
+      "bundleIdentifier" : "com.masko.desktop",
+      "bundleVersion" : "168",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Masko",
+      "path" : "\/Applications\/Masko.app",
+      "shortVersion" : "0.39.3"
+    },
+    {
+      "bundleIdentifier" : "com.netease.mumu.nemux-global",
+      "bundleVersion" : "1009002000",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "MuMuPlayer Pro",
+      "path" : "\/Applications\/MuMuPlayer Pro.app",
+      "shortVersion" : "1.9.2"
+    },
+    {
+      "bundleIdentifier" : "com.meta.endo",
+      "bundleVersion" : "1098887160",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Muse",
+      "path" : "\/Applications\/Muse.app",
+      "shortVersion" : "9.0"
+    },
+    {
+      "bundleIdentifier" : "notion.id",
+      "bundleVersion" : "7.40.1",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Notion",
+      "path" : "\/Applications\/Notion.app",
+      "shortVersion" : "7.40.1"
+    },
+    {
+      "bundleIdentifier" : "com.electron.ollama",
+      "bundleVersion" : "0.40.11",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Ollama",
+      "path" : "\/Applications\/Ollama.app",
+      "shortVersion" : "0.40.11"
+    },
+    {
+      "bundleIdentifier" : "com.robinebers.openusage",
+      "bundleVersion" : "656",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "OpenUsage",
+      "path" : "\/Applications\/OpenUsage.app",
+      "shortVersion" : "0.7.16-beta.1"
+    },
+    {
+      "bundleIdentifier" : "com.stablyai.orca",
+      "bundleVersion" : "1.4.241",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Orca",
+      "path" : "\/Applications\/Orca.app",
+      "shortVersion" : "1.4.241"
+    },
+    {
+      "bundleIdentifier" : "ai.perplexity.macv3",
+      "bundleVersion" : "145",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Perplexity",
+      "path" : "\/Applications\/Perplexity.app",
+      "shortVersion" : "26.42.0"
+    },
+    {
+      "bundleIdentifier" : "com.raycast.macos",
+      "bundleVersion" : "0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Raycast",
+      "path" : "\/Applications\/Raycast.app",
+      "shortVersion" : "2.9.0.0"
+    },
+    {
+      "bundleIdentifier" : "com.pvncher.repoprompt",
+      "bundleVersion" : "336",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Repo Prompt",
+      "path" : "\/Applications\/Repo Prompt.app",
+      "shortVersion" : "2.1.33"
+    },
+    {
+      "bundleIdentifier" : "com.apple.Safari",
+      "bundleVersion" : "22625.2.8.11.9",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Safari",
+      "path" : "\/Applications\/Safari.app",
+      "shortVersion" : "27.2"
+    },
+    {
+      "bundleIdentifier" : "org.whispersystems.signal-desktop-beta",
+      "bundleVersion" : "1",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Signal Beta",
+      "path" : "\/Applications\/Signal Beta.app",
+      "shortVersion" : "8.33.0-beta.1"
+    },
+    {
+      "bundleIdentifier" : "com.tinyspeck.slackmacgap",
+      "bundleVersion" : "452000182",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Slack",
+      "path" : "\/Applications\/Slack.app",
+      "shortVersion" : "4.52.182"
+    },
+    {
+      "bundleIdentifier" : "com.spotify.client",
+      "bundleVersion" : "1.3.6.1921",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Spotify",
+      "path" : "\/Applications\/Spotify.app",
+      "shortVersion" : "1.3.6.1921"
+    },
+    {
+      "bundleIdentifier" : "com.superset.desktop",
+      "bundleVersion" : "1.40.0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Superset",
+      "path" : "\/Applications\/Superset.app",
+      "shortVersion" : "1.40.0"
+    },
+    {
+      "bundleIdentifier" : "com.superduper.superwhisper",
+      "bundleVersion" : "3.0.2",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Superwhisper",
+      "path" : "\/Applications\/superwhisper.app",
+      "shortVersion" : "3.0.2"
+    },
+    {
+      "bundleIdentifier" : "com.t3tools.t3code",
+      "bundleVersion" : "0.1.3-nightly.20261026.3707",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "T3 Code (Nightly)",
+      "path" : "\/Applications\/T3 Code (Nightly).app",
+      "shortVersion" : "0.1.3-nightly.20261026.3707"
+    },
+    {
+      "bundleIdentifier" : "io.tailscale.ipn.macsys",
+      "bundleVersion" : "101.104.2",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Tailscale",
+      "path" : "\/Applications\/Tailscale.app",
+      "shortVersion" : "1.104.2"
+    },
+    {
+      "bundleIdentifier" : "com.tdesktop.Telegram",
+      "bundleVersion" : "7.3.3",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Telegram",
+      "path" : "\/Applications\/Telegram.app",
+      "shortVersion" : "7.3.3"
+    },
+    {
+      "bundleIdentifier" : "com.termius-dmg.mac",
+      "bundleVersion" : "10.2.1",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Termius",
+      "path" : "\/Applications\/Termius.app",
+      "shortVersion" : "10.2.1"
+    },
+    {
+      "bundleIdentifier" : "so.stencil.tern",
+      "bundleVersion" : "0.9.5",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Tern",
+      "path" : "\/Applications\/Tern.app",
+      "shortVersion" : "0.9.5"
+    },
+    {
+      "bundleIdentifier" : "com.apple.TestFlight",
+      "bundleVersion" : "692.1",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "TestFlight",
+      "path" : "\/Applications\/TestFlight.app",
+      "shortVersion" : "4.4.0"
+    },
+    {
+      "bundleIdentifier" : "com.macpaw.site.theunarchiver",
+      "bundleVersion" : "147",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "The Unarchiver",
+      "path" : "\/Applications\/The Unarchiver.app",
+      "shortVersion" : "4.3.9"
+    },
+    {
+      "bundleIdentifier" : "ai.traycer.desktop",
+      "bundleVersion" : "1.4.2",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Traycer",
+      "path" : "\/Applications\/Traycer.app",
+      "shortVersion" : "1.4.2"
+    },
+    {
+      "bundleIdentifier" : "app.updatest.Updatest",
+      "bundleVersion" : "20261013.1821",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Updatest",
+      "path" : "\/Applications\/Updatest.app",
+      "shortVersion" : "3.0.0"
+    },
+    {
+      "bundleIdentifier" : "com.ios.urban-vpn-cyber-security",
+      "bundleVersion" : "328",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Urban VPN",
+      "path" : "\/Applications\/Urban VPN.app",
+      "shortVersion" : "2.4.0"
+    },
+    {
+      "bundleIdentifier" : "com.abyssbugg.vigilpc",
+      "bundleVersion" : "1.0.0",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "VigilPC",
+      "path" : "\/Applications\/VigilPC.app",
+      "shortVersion" : "1.0.0"
+    },
+    {
+      "bundleIdentifier" : "dev.warp.Warp-Stable",
+      "bundleVersion" : "0.2026.10.21.08.25.02",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Warp",
+      "path" : "\/Applications\/Warp.app",
+      "shortVersion" : "0.2026.10.21.08.25.02"
+    },
+    {
+      "bundleIdentifier" : "net.whatsapp.WhatsApp",
+      "bundleVersion" : "1095573697",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "WhatsApp",
+      "path" : "\/Applications\/WhatsApp.app",
+      "shortVersion" : "26.42.19"
+    },
+    {
+      "bundleIdentifier" : "com.seewillow.WillowMac",
+      "bundleVersion" : "2.6.9",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "Willow Voice",
+      "path" : "\/Applications\/Willow Voice.app",
+      "shortVersion" : "2.6.9"
+    },
+    {
+      "bundleIdentifier" : "com.electron.wispr-flow",
+      "bundleVersion" : "1.6.1264",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Wispr Flow",
+      "path" : "\/Applications\/Wispr Flow.app",
+      "shortVersion" : "1.6.1264"
+    },
+    {
+      "bundleIdentifier" : "com.apple.dt.Xcode",
+      "bundleVersion" : "25183.29.15",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "Xcode",
+      "path" : "\/Applications\/Xcode-beta.app",
+      "shortVersion" : "27.0"
+    },
+    {
+      "bundleIdentifier" : "dev.zcode.app",
+      "bundleVersion" : "3.16.3.8992",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "ZCode",
+      "path" : "\/Applications\/ZCode.app",
+      "shortVersion" : "3.16.3"
+    },
+    {
+      "bundleIdentifier" : "com.cmuxterm.app",
+      "bundleVersion" : "111",
+      "hasSparkleFeed" : true,
+      "isMacAppStore" : false,
+      "name" : "cmux",
+      "path" : "\/Applications\/cmux.app",
+      "shortVersion" : "0.65.2"
+    },
+    {
+      "bundleIdentifier" : "com.citrolabs.ego.lite",
+      "bundleVersion" : "6.1.11",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "ego lite",
+      "path" : "\/Applications\/ego lite.app",
+      "shortVersion" : "0.6.1.11"
+    },
+    {
+      "bundleIdentifier" : "com.yetone.magpie",
+      "bundleVersion" : "0.1.1564",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "magpie",
+      "path" : "\/Applications\/magpie.app",
+      "shortVersion" : "0.1.1564"
+    },
+    {
+      "bundleIdentifier" : "engineering.super.app",
+      "bundleVersion" : "54bb5dca",
+      "hasSparkleFeed" : false,
+      "isMacAppStore" : false,
+      "name" : "super.engineering",
+      "path" : "\/Applications\/super.engineering.app",
+      "shortVersion" : "54bb5dca"
+    }
+  ],
+  "count" : 82,
+  "mode" : "scan"
+}
