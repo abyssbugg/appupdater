@@ -350,7 +350,7 @@ public struct RuleStore: Sendable {
             }
             byIdentity[identity] = rule
         }
-        if byIdentity.count < rules.count, rules.count > 0 {
+        if byIdentity.count < rules.count, !rules.isEmpty {
             Self.log.notice(
                 "rules dedupe: collapsed \(rules.count - byIdentity.count, privacy: .public) duplicate rule(s)"
             )

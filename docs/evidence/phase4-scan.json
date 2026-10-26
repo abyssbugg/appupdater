@@ -2,12 +2,12 @@
   "apps" : [
     {
       "bundleIdentifier" : "com.1password.1password",
-      "bundleVersion" : "8.12.46-17.NIGHTLY",
+      "bundleVersion" : "8.12.46-18.NIGHTLY",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "1Password",
       "path" : "\/Applications\/1Password.app",
-      "shortVersion" : "8.12.46-17.NIGHTLY"
+      "shortVersion" : "8.12.46-18.NIGHTLY"
     },
     {
       "bundleIdentifier" : "com.adguard.mac.adguard",
@@ -29,7 +29,7 @@
     },
     {
       "bundleIdentifier" : "com.ampcode.amp.macos",
-      "bundleVersion" : "918",
+      "bundleVersion" : "931",
       "hasSparkleFeed" : true,
       "isMacAppStore" : false,
       "name" : "Amp",
@@ -56,12 +56,12 @@
     },
     {
       "bundleIdentifier" : "me.blueone.mac",
-      "bundleVersion" : "23125",
+      "bundleVersion" : "23186",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "BlueMail",
       "path" : "\/Applications\/BlueMail.app",
-      "shortVersion" : "1.143.61"
+      "shortVersion" : "1.143.64"
     },
     {
       "bundleIdentifier" : "com.brave.Browser",
@@ -119,12 +119,12 @@
     },
     {
       "bundleIdentifier" : "bot.cline.app",
-      "bundleVersion" : "0.0.48",
+      "bundleVersion" : "0.0.49",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "Cline",
       "path" : "\/Applications\/Cline.app",
-      "shortVersion" : "0.0.48"
+      "shortVersion" : "0.0.49"
     },
     {
       "bundleIdentifier" : "com.microsoft.VSCode",
@@ -191,12 +191,12 @@
     },
     {
       "bundleIdentifier" : "com.duckduckgo.macos.browser",
-      "bundleVersion" : "845",
+      "bundleVersion" : "859",
       "hasSparkleFeed" : true,
       "isMacAppStore" : false,
       "name" : "DuckDuckGo",
       "path" : "\/Applications\/DuckDuckGo.app",
-      "shortVersion" : "1.212.0"
+      "shortVersion" : "1.213.0"
     },
     {
       "bundleIdentifier" : "com.express.vpn",
@@ -218,12 +218,12 @@
     },
     {
       "bundleIdentifier" : "com.figma.Desktop",
-      "bundleVersion" : "126.10.11",
+      "bundleVersion" : "126.10.13",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "Figma",
       "path" : "\/Applications\/Figma.app",
-      "shortVersion" : "126.10.11"
+      "shortVersion" : "126.10.13"
     },
     {
       "bundleIdentifier" : "studio.flowdeck.macos",
@@ -263,12 +263,12 @@
     },
     {
       "bundleIdentifier" : "com.mitchellh.ghostty",
-      "bundleVersion" : "18413",
+      "bundleVersion" : "18436",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "Ghostty",
       "path" : "\/Applications\/Ghostty.app",
-      "shortVersion" : "0fe113a35"
+      "shortVersion" : "ebd449995"
     },
     {
       "bundleIdentifier" : "com.github.githubapp",
@@ -290,12 +290,12 @@
     },
     {
       "bundleIdentifier" : "com.grammarly.ProjectLlama",
-      "bundleVersion" : "1.203.0.0",
+      "bundleVersion" : "1.204.1.0",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "Grammarly Desktop",
       "path" : "\/Applications\/Grammarly Desktop.app",
-      "shortVersion" : "1.203.0"
+      "shortVersion" : "1.204.1"
     },
     {
       "bundleIdentifier" : "com.granola.app",
@@ -407,12 +407,12 @@
     },
     {
       "bundleIdentifier" : "com.masko.desktop",
-      "bundleVersion" : "168",
+      "bundleVersion" : "169",
       "hasSparkleFeed" : true,
       "isMacAppStore" : false,
       "name" : "Masko",
       "path" : "\/Applications\/Masko.app",
-      "shortVersion" : "0.39.3"
+      "shortVersion" : "0.39.4"
     },
     {
       "bundleIdentifier" : "com.netease.mumu.nemux-global",
@@ -452,12 +452,12 @@
     },
     {
       "bundleIdentifier" : "com.robinebers.openusage",
-      "bundleVersion" : "656",
+      "bundleVersion" : "659",
       "hasSparkleFeed" : true,
       "isMacAppStore" : false,
       "name" : "OpenUsage",
       "path" : "\/Applications\/OpenUsage.app",
-      "shortVersion" : "0.7.16-beta.1"
+      "shortVersion" : "0.7.16"
     },
     {
       "bundleIdentifier" : "com.stablyai.orca",
@@ -551,12 +551,12 @@
     },
     {
       "bundleIdentifier" : "com.t3tools.t3code",
-      "bundleVersion" : "0.1.3-nightly.20261026.3707",
+      "bundleVersion" : "0.1.3-nightly.20261026.3726",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "T3 Code (Nightly)",
       "path" : "\/Applications\/T3 Code (Nightly).app",
-      "shortVersion" : "0.1.3-nightly.20261026.3707"
+      "shortVersion" : "0.1.3-nightly.20261026.3726"
     },
     {
       "bundleIdentifier" : "io.tailscale.ipn.macsys",
@@ -632,12 +632,12 @@
     },
     {
       "bundleIdentifier" : "com.ios.urban-vpn-cyber-security",
-      "bundleVersion" : "328",
+      "bundleVersion" : "345",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "Urban VPN",
       "path" : "\/Applications\/Urban VPN.app",
-      "shortVersion" : "2.4.0"
+      "shortVersion" : "2.5.0"
     },
     {
       "bundleIdentifier" : "com.abyssbugg.vigilpc",
@@ -713,21 +713,21 @@
     },
     {
       "bundleIdentifier" : "com.citrolabs.ego.lite",
-      "bundleVersion" : "6.1.11",
+      "bundleVersion" : "6.1.13",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "ego lite",
       "path" : "\/Applications\/ego lite.app",
-      "shortVersion" : "0.6.1.11"
+      "shortVersion" : "0.6.1.13"
     },
     {
       "bundleIdentifier" : "com.yetone.magpie",
-      "bundleVersion" : "0.1.1564",
+      "bundleVersion" : "0.1.1630",
       "hasSparkleFeed" : false,
       "isMacAppStore" : false,
       "name" : "magpie",
       "path" : "\/Applications\/magpie.app",
-      "shortVersion" : "0.1.1564"
+      "shortVersion" : "0.1.1630"
     },
     {
       "bundleIdentifier" : "engineering.super.app",

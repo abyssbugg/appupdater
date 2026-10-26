@@ -44,12 +44,16 @@ mounts) — applying to real third-party apps stays an explicit owner CLI action
 - ✅ **J. Coordinator** (`Installer/InstallPlanner.swift` pure + `Installer/InstallCoordinator.swift` + `Tests/InstallCoordinatorTests.swift`): receipts per ATTEMPTED step, abort-at-first-failure, INDEPENDENT sha256 re-verify (defense in depth), old-copy Trash disposition (injectable; default trashItem), per-apply staging workspace hygiene, postScan = direct Info.plist read; CLI `install` (dry-run plans + `--apply` real executor wiring; target discipline: exactly one --apps match; refusal exits touch nothing).
 Evidence (this session): • merged main = `79f8f8a`/`146299f`/`a10cc38`/`8207142` + lane commits `8813768`/`35b3f5f`/`6eeb8e7`/`e8bfde4` • `swift test` 137 tests / 13 suites exit 0 (incl. real-disk zip+dmg apply with dmg-mount leak assert) • live /Applications runs: `docs/evidence/phase3-scan.json` (82 apps), `phase3-check.json` (Ghostty=update, MacUpdater=current, AdGuard/Chrome=unknown), `phase3-installplan.json` (Ghostty → real 9-step dmg plan) • honest refusals: `--apply` zero-match → exit 2; current-verdict → exit 3; `~/Library/Application Support/AppUpdater` verified ABSENT after both (refusals create nothing) • bundle/sign/launch gate green.
 
-## Phase 4 — Scheduler + UI surface — ✅ DONE (2026-10-26, gates proven; notifications remain an explicit in-phase OPEN item, never claimed)
+## Phase 4 — Scheduler + UI surface — ✅ DONE (2026-10-26, gates proven; deferred notifications + open-item lanes CLOSED in the follow-up close-out, same day)
 Gate status: scheduled fires + missed-scan catch-up + per-app auto-check rules + BOTH UI surfaces
 (menu-bar + window) live on the real machine. LOCKED boundaries restated in code: auto rules govern
 CHECKS + NOTIFICATIONS ONLY — auto-apply is never released; "Install Now" stages the exact owner-run
 CLI command (pasteboard + verbatim text) and the app itself executes nothing. Real `install --apply`
 stays the per-app owner CLI action (consent boundary, unchanged from Phase 3).
+**Close-out addendum (2026-10-26, later session):** the deferred notifications item + the three
+tracked open-item lanes (caskalias / channels / retention) all merged; union 227 tests / 20 suites
+×3 back-to-back + ×2 concurrent, lint 0 errors, live-launch + CLI gates re-proven. Full evidence
+narrative: `docs/archive/AGENT_LOG.md` close-out entry.
 - ✅ **Frozen interchange types** — `Model/ScheduleStore.swift` (coordinator-owned, committed BEFORE
   lanes dispatched): SchedulePolicy (interval / skipOnBattery / onWakeCatchUp, floor+off clamped by
   `RuleStore.clamped`) / ScheduleState (lastFireAt, appsChecked, wasCatchUp, error) / ScheduleSnapshot /

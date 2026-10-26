@@ -95,6 +95,11 @@ struct ScheduleEngineTests {
         #expect(await waitUntil(harness.fireCount == 2))
         await step(harness, 15)
         #expect(await waitUntil(harness.fireCount == 3))
+        // Arrival-wait: the fire seam returning (fireCount) is NOT the same event
+        // as the post-fire snapshot being consumed by the collector task; under
+        // parallel-suite CPU load the read below could otherwise win that race
+        // and observe the stale policy-load snapshot (observed in the wild once).
+        #expect(await waitUntil(run.collector.states.count >= 4))
         let states = run.collector.states
         #expect(states.count == 4) // policy-load + 3 post-fire
         #expect(states[0].state.lastFireWasCatchUp == nil) // persisted: never ran yet
@@ -124,6 +129,9 @@ struct ScheduleEngineTests {
         #expect(harness.fireArguments == [["com.tick.a", "com.tick.b", "com.tick.c"]])
         #expect(harness.fireTimes == [Self.epoch.addingTimeInterval(59 * Self.minute)])
 
+        // Arrival-wait before reading: fireCount flips when the fire seam returns,
+        // the post-fire snapshot lands on the collector asynchronously after that.
+        #expect(await waitUntil(run.collector.states.count >= 2))
         let post = try #require(run.collector.states.last?.state)
         #expect(post.lastFireAppsChecked == 9)
         #expect(post.lastFireAt == Self.epoch.addingTimeInterval(59 * Self.minute))
@@ -166,6 +174,7 @@ struct ScheduleEngineTests {
         harness.setShouldThrow(TestError.boom)
         await step(harness, 59)
         #expect(await waitUntil(harness.fireCount == 1))
+        #expect(await waitUntil(run.collector.states.count >= 2)) // post-fire snapshot arrival
 
         let failed = try #require(run.collector.states.last?.state)
         #expect(failed.lastFireError == String(describing: TestError.boom))
@@ -177,6 +186,7 @@ struct ScheduleEngineTests {
         harness.setShouldThrow(nil)
         await step(harness, 60) // next slot = (epoch+59min) + 60min
         #expect(await waitUntil(harness.fireCount == 2))
+        #expect(await waitUntil(run.collector.states.count >= 3)) // recovery snapshot arrival
         let recovered = try #require(run.collector.states.last?.state)
         #expect(recovered.lastFireError == nil)
         #expect(recovered.lastFireAppsChecked == 7)
@@ -199,6 +209,7 @@ struct ScheduleEngineTests {
         await step(harness, 60)
         #expect(await waitUntil(harness.fireCount == 1, within: 0.5) == false)
         #expect(harness.fireCount == 0)
+        #expect(await waitUntil(run.collector.states.count >= 1)) // policy-load snapshot arrival
         #expect(run.collector.states.count == 1) // only the policy-load snapshot
 
         // Probe flips false → the deferred grid slot (skip + one interval = +75min)
@@ -206,6 +217,7 @@ struct ScheduleEngineTests {
         harness.setBattery(false)
         await step(harness, 70) // now = epoch+130min ≥ wake (epoch+75min)
         #expect(await waitUntil(harness.fireCount == 1))
+        #expect(await waitUntil(run.collector.states.count >= 2)) // post-fire snapshot arrival
 
         #expect(run.collector.states.count == 2)
         let post = try #require(run.collector.states.last?.state)
@@ -229,11 +241,13 @@ struct ScheduleEngineTests {
         defer { run.cancelIteration() }
 
         #expect(await waitUntil(harness.fireCount == 1, within: 0.3) == false)
+        #expect(await waitUntil(run.collector.states.count >= 1)) // policy-load snapshot arrival
         #expect(run.collector.states.count == 1)
 
         harness.setBattery(false)
         await step(harness, 60) // deferred grid slot = epoch+60min
         #expect(await waitUntil(harness.fireCount == 1))
+        #expect(await waitUntil(run.collector.states.count >= 2)) // post-fire snapshot arrival
         let post = try #require(run.collector.states.last?.state)
         #expect(post.lastFireWasCatchUp == false)
     }
@@ -257,6 +271,7 @@ struct ScheduleEngineTests {
         await step(harness, 15)
         #expect(await waitUntil(harness.fireCount == 1))
         #expect(harness.fireTimes == [Self.epoch.addingTimeInterval(15 * Self.minute)])
+        #expect(await waitUntil(run.collector.states.count >= 2)) // post-fire snapshot arrival
         let post = try #require(run.collector.states.last?.state)
         #expect(post.lastFireWasCatchUp == false)
     }

@@ -1,0 +1,64 @@
+# swiftlint gate config — RELEASE-PLUMBING.md §3 policy encoded.
+# Style is WARNING-only (the repo's house style is doc-comment-heavy honesty;
+# documenting is not a lint offense). Correctness-relevant force-* rules are
+# ERRORS and they are the bite: a release introducing new force_* errors is
+# blocked (see RELEASE-PLUMBING.md §3).
+included:
+  - Sources
+  - Tests
+line_length:
+  warning: 160
+  error: 240
+  ignores_function_declarations: true
+  ignores_comments: true
+  ignores_urls: true
+identifier_name:
+  severity: warning
+  min_length: 2
+  excluded:
+    - id
+    - e
+    - fm
+    - d
+    - r
+    - a
+    - b
+    - n
+    - s
+disabled_rules:
+  # house style keeps honest, explanatory file headers; superfluous-disable
+  # and todo debt tracking live in docs, not lints
+  - todo
+  - trailing_comma
+analyzer_rules: []
+opt_in_rules:
+  - force_cast
+  - force_try
+  - force_unwrapping
+  - empty_count
+  - first_where
+  - last_where
+# force_unwrapping is a SYNTAX rule: `excluded` is not a supported key for it —
+# its 4 test-file hits (fail-fast fixtures) get source-level treatment after the
+# running lanes merge, same as the shipping-code sites. Projection is honest:
+# warnings for style, errors for force-* in shipping code.
+force_cast:
+  severity: error
+  excluded:
+    - Tests
+force_try:
+  severity: error
+  excluded:
+    - Tests
+force_unwrapping: error
+empty_count:
+  severity: warning
+cyclomatic_complexity:
+  warning: 10
+  error: 50
+function_body_length:
+  warning: 160
+  error: 400
+type_body_length:
+  warning: 300
+  error: 600

@@ -75,9 +75,12 @@ enum AppcastParser {
         from items: [SparkleAppcastItem],
         installedBundleVersion: String?
     ) -> SparkleAppcastItem? {
-        let eligible = items.filter { item in
-            guard let version = item.sparkleVersion, !version.isEmpty else { return false }  // untrusted
-            return isDefaultChannel(item.channel)
+        // Unwrap-once: each eligible entry carries its parsed, non-empty version,
+        // so the comparison sites below never force-unwrap (lint: force_unwrapping).
+        let eligible: [(item: SparkleAppcastItem, version: String)] = items.compactMap { item in
+            guard let version = item.sparkleVersion, !version.isEmpty else { return nil }  // untrusted
+            guard isDefaultChannel(item.channel) else { return nil }
+            return (item, version)
         }
         guard !eligible.isEmpty else { return nil }
 
@@ -87,23 +90,23 @@ enum AppcastParser {
         let candidates = installed.isEmpty
             ? eligible
             : eligible.filter {
-                // Integation note: was SparkleVersionComparator (temporary lane-local
+                // Integration note: was SparkleVersionComparator (temporary lane-local
                 // comparator); swapped to the shared VersionOracle per merge plan.
-                oracle.compare($0.sparkleVersion!, installed) == .greater
+                oracle.compare($0.version, installed) == .greater
             }
         guard let first = candidates.first else { return nil }
 
         var winner = first
         for candidate in candidates.dropFirst() {
-            let comparison = oracle.compare(candidate.sparkleVersion!, winner.sparkleVersion!)
+            let comparison = oracle.compare(candidate.version, winner.version)
             if comparison == .greater {
                 winner = candidate
             } else if comparison == .equal,
-                      (candidate.pubDate ?? .distantPast) > (winner.pubDate ?? .distantPast) {
+                      (candidate.item.pubDate ?? .distantPast) > (winner.item.pubDate ?? .distantPast) {
                 winner = candidate
             }
         }
-        return winner
+        return winner.item
     }
 
     static func isDefaultChannel(_ channel: String?) -> Bool {

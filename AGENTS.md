@@ -104,23 +104,24 @@ Point at files that exist. A missing doc is a gap to flag, not a file to invent 
 
 ## Verification gate
 
-The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-26, Phase 4 close).**
+The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-26, close-out after notifications/caskalias/retention/channels lanes).**
 
 ```
-swift build                                    # PROVEN exit=0 (Phase 4 close)
-swift test                                     # PROVEN 196 tests / 18 suites, exit=0 (×4 this session: 3 stability runs + definitive close-out run)
+swift build                                    # PROVEN exit=0 (close-out union)
+swift test                                     # PROVEN 227 tests / 20 suites, exit=0 (×3 back-to-back stability runs)
                                                # PLUS: 2 CONCURRENT full swift test runs both green, 0 failures (flake-proof protocol)
+swiftlint lint                                 # PROVEN 0 error-severity hits (lint gate REAL: swiftlint 0.65.1, calibrated .swiftlint.yml)
 Scripts/make-app.sh release                    # PROVEN "Assembled: build/AppUpdater.app"
 codesign -v --strict build/AppUpdater.app      # PROVEN OK (adhoc)
 plutil -lint build/AppUpdater.app/Contents/Info.plist   # PROVEN OK
 launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN launch observed; FIRST-EVER schedule fire honest: schedule.json written with lastFireWasCatchUp=false, lastFireAt set, appsChecked=82; clean quit; 0 crash reports
 swift run appupdater-cli scan                  # PROVEN 82 apps inventoried from real /Applications (docs/evidence/phase4-scan.json)
-swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROVEN honest verdicts (Ghostty=update 1.3.1, MacUpdater=current, AdGuard/Chrome=unknown) (docs/evidence/phase4-check.json)
+swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROVEN honest verdicts (Ghostty=update 1.3.1, MacUpdater=current, Chrome=current via the new cask alias table, AdGuard=unknown honest pkg-cask refusal) (docs/evidence/phase4-check.json)
 swift run appupdater-cli install --apps Ghostty --out docs/evidence/phase4-installplan.json   # PROVEN real 9-step dmg plan, applied:false (dry-run)
-swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest refusal exit=3 (verdict 'current'); --apps DoesNotExist123 --apply → exit=2; ~/Library/Application Support/AppUpdater verified UNCHANGED by both (dir legitimately exists from the app's own run; refusals add no install artifacts; refusal runs write no output file — exit precedes any artifact by design)
+swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest refusal exit=3 (verdict 'current'); --apps DoesNotExist123 --apply → exit=2; refusal runs write no output file — exit precedes any artifact by design
 ```
 
-- swiftlint is still NOT installed (`brew install swiftlint` pending) — that gate line stays unverified and is treated as debt, not skipped silently.
+- swiftlint IS NOW INSTALLED and calibrated (`.swiftlint.yml`): style = warnings; the ERROR column is force_cast / force_try / force_unwrapping — **0 errors proven**. The old "not installed" debt line is retired.
 - `install --apply` on a REAL app with an accepted plan is the owner-run destructive boundary: the autonomous gate proves refusal paths + dry-run only; full apply execution is proven in hermetic real-disk fixture tests (`InstallCoordinatorTests`, temp workspaces, never /Applications, user's real Trash never touched).
 - A change is done when every line of this gate has evidence from this session. Anything skipped is **unverified**.
 
@@ -129,6 +130,7 @@ swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest ref
 ## Gotcha ledger (read before touching the matching area)
 
 ```
+- **Async-stream snapshot tests: "side effect happened" ≠ "snapshot arrived"** — `waitUntil(fireCount == N)` proves the fire SEAM returned, but the post-fire snapshot is emitted to the AsyncStream and consumed by a SEPARATE collector task; reading `collector.states.last` immediately wins that race under parallel-suite CPU load (observed once in the wild: `normalTickFireRecordsListAndCount` read the stale policy-load snapshot — `lastFireAt = epoch−1min`, nil count/catchUp — and failed; passed on rerun + isolated). Fix: wait for the SNAPSHOT ARRIVAL (`waitUntil(run.collector.states.count >= N)`) before any read — the pattern `snapshotsYieldInitialAndPostFire` already used. Applied to all 7 read-sites in `ScheduleEngineTests.swift`; proven ×3 back-to-back + 2 concurrent full runs green. Evidence: close-out 2026-10-26.
 - **Shared fixed temp roots in test suites = cross-process fixture collision (the Phase-4 flake)** — suites whose `init()` wipes a hardcoded `temporaryDirectory/appupdater-<name>` delete ANOTHER concurrent `swift test` runner's fixtures mid-flight (`hdiutil attach failed`, `bundle.zip: No such file`); passes in isolation, fails only under parallel runners. Root-cause evidence: overlap observed during 4-lane fan-out (`ps` samples in listvm's gate). Fix: make the suite root name unique per PROCESS (`private static let …appendingPathComponent("appupdater-<name>-\(UUID().uuidString)")` — static = computed once per process, per-test wipe semantics kept), then prove with `swift test` ×3 back-to-back AND two concurrent full runs, all green. Never name a wiped test root a constant. Evidence: Phase 4 reconciliation, `DeployTests`/`IntegrationTests`/`InstallCoordinatorTests`/`RuleStoreTests`.
 - **`OSLogMessage` `'+'` interpolation-concatenation forbidden** — appending two message literals with `+` fails to compile on this SDK (OSLogMessage is not `String` Combineable). Fix: single literal, or two log calls / string building outside the logger macro. Evidence: Phase 4 rules lane (`RuleStore.swift` logging).
 - **`FileHandle.write` needs the `contents:` label on this SDK** — `handle.write(data)` is rejected; write as `handle.write(contentsOf: data)`. Evidence: Phase 4 rules lane (atomic save).
@@ -153,17 +155,17 @@ swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest ref
 
 - [x] **Phase 3 (Installer) — DONE** 2026-10-26: 4 lanes (`download/backup/deploy/quitlaunch`) merged + coordinator wiring (`InstallPlanner` pure planner, `InstallCoordinator` executor composition, CLI `install` dry-run + honest `--apply`), 137 tests / 13 suites green, real-disk end-to-end (zip + dmg, backup round-trip, hijack refusal, no leftover mounts), live CLI refusals evidenced. Details + evidence: BUILD-PLAN Phase 3 block, `docs/evidence/phase3-*.json`.
 - [x] **Phase 4 (Scheduler + UI) — DONE** 2026-10-26: 4 lanes (`scheduler/rules/menudata/listvm`) merged; coordinator wiring (`ScheduleFileStore`, AppState orchestrator w/ engine stream + real VM seams via SeamRouter, MenuBarView/MainWindowView/ScheduleSettingsView, dynamic menu title); live-evidence fixes (first-ever fire = NORMAL fire; cross-process fixture flake root-caused + fixed + concurrency-proven). 196 tests / 18 suites, CLI + bundle + live-launch gates green, `docs/evidence/phase4-*.json`. Details: BUILD-PLAN Phase 4 block.
-- [ ] **Phase 4 deferred items (NOT done — carried open):** local notifications from scheduled fires, and the distributed-notification scriptability surface (custom names documented) — scheduled inside Phase 4, deliberately left unwired rather than claimed; design + implementation continue as Phase-4 open work when the owner resumes.
+- [x] **Phase 4 deferred items — CLOSED 2026-10-26:** local notifications + distributed-notification scriptability landed via `lane/notifications` (merged `22956ee`); contract notes recorded in AGENT_LOG (removal-only diffs → noChange; `wasCatchUp` honestly `"unknown"` in the distributed payload until posting moves behind the snapshot emit; settings toggle via explicit `Binding` + internal setter preserving `private(set)`; UUID identifiers per fire ⇒ no app-side dedupe in System Settings, consequence documented).
 - [ ] **Phase 5 (Self-update, Sparkle 2)** — NEXT per BUILD-PLAN: appcast + EdDSA-signed artifact verified by sparkle CLI; signed by available identity (personal-use; notarization slot documented).
-- [ ] **Cask alias table (token mapping)** — name-derived token missed `chrome`→`google-chrome` (honest unknown in the evidence run). MacUpdater-style token/bundle-id alias map is the correct later-phase work; whole-index fetch deferred per Lane B decision.
-- [ ] **Non-default Sparkle channels (beta/nightly)** — currently only the default channel is honored (AdGuard nightly correctly shows unknown). Opt-in UI for channel policy comes with the Phase 4 UI work.
-- [ ] **Backup retention wiring** — `keepLatest(_:)` exists (lane backup) but is NOT wired into the apply flow: retention policy (default N, owner-visible) belongs with the Phase 4 scheduler product decisions; nothing deletes backups silently today.
+- [x] **Cask alias table (token mapping) — DONE 2026-10-26** via `lane/caskalias` (merged): `CaskAliases` built-in table, 14 live-verified tokens (chrome→google-chrome etc.), alias retry ONLY after a primary-token 404, documented refusals (bionic→lm-studio-bionic name-collision trap; tailscale→tailscale-app pkg-only). Live proof: Chrome verdict `unknown → current` in the refreshed evidence run.
+- [x] **Non-default Sparkle channels — DONE 2026-10-26** via `lane/channels` (merged): `InstalledApp.suDefaultChannel` captured from Info.plist; `SparkleSource.selectAdmissible` implements Sparkle's exact-match channel semantics (declared channel joins default; case-sensitive; empty declaration = no declaration). Non-declaring apps unchanged (AdGuard nightly still honest-unknown).
+- [x] **Backup retention wiring — DONE 2026-10-26** via `lane/retention` (merged): `InstallCoordinator.retentionKeep` (default 3, init-validated ≥1) prunes best-effort AFTER a fully green apply; prune failure = receipt note, never an abort; refusals never prune; `InstallOutcome.retentionNote` additive Codable field.
+- [x] **swiftlint installed + calibrated — DONE 2026-10-26**: 0.65.1 via brew; `.swiftlint.yml` (style=warnings; force_cast/force_try/force_unwrapping=errors; tests excluded where the rule supports it); all 15 baseline force-unwraps fixed at root cause (AppcastParser unwrap-once, CLI errLine helper, test `#require`s), 0 errors proven. See `docs/RELEASE-PLUMBING.md §3`.
 - [x] **Stack freeze** — Swift 6.4 / Xcode 27 / SwiftPM / Sparkle 2 / SwiftUI+AppKit shell / deployment target **macOS 15.0**. Owner sign-off 2026-10-26 (LOCKED decision 8).
 - [x] **Canonical remote** — `abyssbugg/appupdater` private repo created + pushed 2026-10-26 (LOCKED table above).
 - [x] **v1 source set** — cask JSON index + app's own Sparkle appcast + MAS (iTunes lookup) + GitHub optional-flag; Electron/scrape deferred. Evidence: live samples in `docs/evidence/`.
 - [ ] **Apple Developer Program enrollment** — owner confirmed "personal use for now" 2026-10-26. Until enrolled: local dev-class signing (`Spike0 Signing`) only; **no distribution claims**. When enrolled: Developer ID App + Installer certs, notarization joins the release pipeline. Evidence: `security find-identity -v -p codesigning`.
-- [ ] **Privileged helper** — owner directed parallel coverage via worktrees/subagents (LOCKED decision 10): may run as its own concurrent lane, but is auth-touching ⇒ **threat-model review before any implementation** (CLAUDE.md §7). Landed value shows with PKG/hard cases; not a v1 blocker either way.
-- [ ] **swiftlint not installed** — `brew install swiftlint` before the lint gate line becomes real.
+- [ ] **Privileged helper** — owner directed parallel coverage via worktrees/subagents (LOCKED decision 10): may run as its own concurrent lane, but is auth-touching ⇒ **threat-model review before any implementation** (CLAUDE.md §7). Landed value shows with PKG/hard cases; not a v1 blocker either way. Gate deliverable drafted: `docs/threat-model/PRIVILEGED-HELPER-REVIEW.md` — **AWAITING OWNER SIGN-OFF; no implementation may start before it is approved.**
 
 ---
 

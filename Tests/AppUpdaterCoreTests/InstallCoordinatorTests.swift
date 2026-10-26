@@ -292,8 +292,8 @@ extension InstallCoordinatorTests {
     /// The fixture's OWN name is served — the planner derives the artifact kind
     /// from the download URL's extension (locked rule), so the URL carries a
     /// realistic .zip/.dmg name, not a synthetic one.
-    private func servedURL(for artifact: URL) -> URL {
-        URL(string: "https://fixtures.local/updates/\(artifact.lastPathComponent)")!
+    private func servedURL(for artifact: URL) throws -> URL {
+        try #require(URL(string: "https://fixtures.local/updates/\(artifact.lastPathComponent)"))
     }
 
     private func planOf(
@@ -306,7 +306,7 @@ extension InstallCoordinatorTests {
         let update = UpdateInfo(
             source: .cask,
             newestShortVersion: claim,
-            downloadURL: servedURL(for: artifact),
+            downloadURL: try servedURL(for: artifact),
             sha256Hex: sha,
             confidence: .medium)
         let victim = InstalledApp(
@@ -320,7 +320,7 @@ extension InstallCoordinatorTests {
 
     /// Serves the fixture (bytes of `artifact`) from the test URL.
     private func serve(_ artifact: URL) throws {
-        ApplyStubURLProtocol.stub(try Data(contentsOf: artifact), for: servedURL(for: artifact).absoluteString)
+        ApplyStubURLProtocol.stub(try Data(contentsOf: artifact), for: try servedURL(for: artifact).absoluteString)
     }
 
     /// Standard v1 victim on disk. Returns the victim's original plist bytes.

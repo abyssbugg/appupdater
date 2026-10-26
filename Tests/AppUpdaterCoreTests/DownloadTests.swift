@@ -350,7 +350,8 @@ struct DownloadTests {
 
         for bad in ["pkg", "tbz", "tgz", "bin", "tar.gz"] {
             do {
-                _ = try UpdateDownloader.kindFromExtension(url: URL(string: "https://x.test/downloads/up.\(bad)")!)
+                let badURL = try #require(URL(string: "https://x.test/downloads/up.\(bad)"))
+                _ = try UpdateDownloader.kindFromExtension(url: badURL)
                 Issue.record("expected unsupportedArtifact for .\(bad), got a kind")
             } catch let error as InstallerError {
                 guard case .unsupportedArtifact(let reason) = error else {

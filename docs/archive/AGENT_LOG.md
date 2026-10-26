@@ -5,6 +5,33 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-26 — Close-out: open-item lanes landed (notifications / caskalias / retention / channels) + lint gate real + scheduler-test flake root-caused
+
+**Context:** the original session (opencode `ses_e8960d549ffeksiNUeRT7Fm6ra`) died on a provider free-limit mid-fan-out after `lane/notifications` merged (`22956ee`). This session resumed per CLAUDE.md §5 ("always `git status` a dead or silent agent's lane before re-dispatching"): two lanes had complete-but-uncommitted WIP in their worktrees (retention: 412 lines / 3 owned files; channels: 310 lines / 5 owned files), one lane was complete-but-unmerged (caskalias `ae3d32b`), and the coordinator's Phase-6 prep was uncommitted on main.
+
+**Confirmed (live evidence, this session):**
+1. **lane/caskalias merged** (`ae3d32b` → merge `f549e6e`): `CaskAliases` built-in table — 14 live-verified tokens, alias retry ONLY after primary-token HTTP 404 (same LookupOutcome pipeline), documented refusals (bionic→lm-studio-bionic name-collision; tailscale→tailscale-app pkg-only). **Live proof: Chrome verdict `unknown → current`** in the refreshed evidence run — the tracked Phase-2 debt is closed by behavior, not by claim.
+2. **lane/retention finished + merged**: a re-dispatched finisher subagent found the dead agent's WIP complete and coherent (`retentionKeep` default 3, init-validated; prune best-effort at the END of the fully green apply chain; prune failure = `InstallOutcome.retentionNote`, never an abort; refusals never prune; 5 tests incl. legacy-JSON decode). Verified ×2 in-worktree (201/18), committed `5eca666`, merged.
+3. **lane/channels finished + merged**: finisher subagent verified the WIP end-to-end (`InstalledApp.suDefaultChannel` capture; `SparkleSource.selectAdmissible` with Sparkle's exact case-sensitive channel semantics + true-channel restore on the winner; 7 tests incl. an exclusion probe and a case-mismatch pin). Gate green ×2 CONCURRENT in-worktree (203/18), committed `329f168`, merged. The subagent independently reproduced and root-caused the scheduler-test flake (see 4) and correctly did NOT touch the file (outside its ownership).
+4. **Scheduler-test flake root-caused + FIXED (new gotcha banked):** `ScheduleEngineTests` read `collector.states.last` immediately after `waitUntil(fireCount == N)` — but the post-fire snapshot is emitted to the AsyncStream and consumed by a separate collector task; under parallel-suite CPU load the read won that race and observed the stale policy-load snapshot (observed once: `lastFireAt = epoch−1min`, nil appsChecked/catchUp). Corroborated by two independent observations (coordinator run + channels subagent run). Fix: arrival-waits (`waitUntil(collector.states.count >= N)`) at all 7 read-sites — the pattern `snapshotsYieldInitialAndPostFire` already used. **Proof: ×3 back-to-back full-suite green + 2 CONCURRENT full runs green.**
+5. **Lint gate made real and CLEAN:** swiftlint 0.65.1 installed; calibrated `.swiftlint.yml`; the remaining queued errors fixed at root cause — `AppcastParser` unwrap-once selection (no force-unwraps; also fixed the "Integation" typo), `SparkleSourceTests` `#require` release-date unwraps + identifier renames (+ removed one unused epoch fixture), `InstallCoordinatorTests.servedURL` → throwing `#require` (2 call sites updated). **0 error-severity hits proven.**
+6. **Union + full gate on merged main:** 227 tests / 20 suites ×3 back-to-back + ×2 concurrent, build exit 0, bundle assembled + adhoc-strict-signed + plist OK, live launch first-ever fire honest (`lastFireWasCatchUp=false`, appsChecked=82), clean quit, 0 crash reports; CLI evidence refreshed (`phase4-scan/check/installplan`); refusals exit 2 / exit 3 as locked.
+7. **Coordinator docs:** AGENTS.md gate renewed (lint line now PROVEN 0 errors; old debt line retired), open items closed (Phase-4 deferred notifications, cask aliases, Sparkle channels, retention wiring, swiftlint), threat-model review document awaiting owner sign-off for Phase 7 (`docs/threat-model/PRIVILEGED-HELPER-REVIEW.md`).
+
+**lane/notifications contract notes (propagated from the original session's accepted review):**
+- Removal-only diffs → `noChange`; no zero-count summary notifications are posted.
+- `wasCatchUp` is honestly `"unknown"` in the distributed payload until posting moves behind the snapshot emit (the fire seam cannot know its own catch-up identity at posting time).
+- The settings toggle is wired via an explicit `Binding` + internal setter, preserving the public `private(set)` surface.
+- Notification identifiers are per-fire UUIDs ⇒ there is no app-side dedupe in System Settings; the consequence is documented rather than hidden.
+
+**Unverified / carried:**
+- Phase 5 (Sparkle 2 self-update) NOT started — phases sequential; it is the next phase after this close-out push.
+- Phase 7 privileged helper: implementation blocked on owner sign-off of the threat-model review (locked rule: the reviewer does not self-approve).
+- Retention tests seed fixed past dates while fresh backups use the real clock — ordering is unambiguous only while the machine clock is later than the newest seed (subagent-flagged mild brittleness, unchanged).
+- `.github/workflows/ci.yml` drafted but never run — hosted-runner Xcode-27 availability UNVERIFIED until first CI execution.
+
+---
+
 ## 2026-10-26 — Phase 4 (Scheduler + UI surface) COMPLETE — engine + rules + both UI surfaces live; notifications honestly deferred
 
 **Confirmed (live evidence, this session):**

@@ -12,9 +12,8 @@ struct SparkleSourceTests {
     /// Verified epoch constants (macOS date -j -f cross-check), asserted as integer instants so the
     /// tests never depend on host locale/timezone.
     private enum RFC822Epochs {
-        static let fri26Sep2025_1230z: Int = 1758889800      // Fri, 26 Sep 2025 12:30:00 +0000
-        static let sun5Jan2025_0900plus1h: Int = 1736064000  // Sun, 5 Jan 2025 09:00:00 +0100
-        static let tue9Sep2025_0915minus7h: Int = 1757434500 // Tue, 9 Sep 2025 09:15:00 -0700
+        static let fri26Sep2025T1230z: Int = 1758889800      // Fri, 26 Sep 2025 12:30:00 +0000
+        static let sun5Jan2025T0900plus1h: Int = 1736064000  // Sun, 5 Jan 2025 09:00:00 +0100
     }
 
     private enum RoutePath {
@@ -210,7 +209,7 @@ struct SparkleSourceTests {
         #expect(update.newestShortVersion == "1.10")  // shortVersionString preferred
         #expect(update.minimumSystemVersion == "12.0")
         #expect(update.releaseDate != nil)
-        #expect(update.releaseDate!.timeIntervalSince1970 == Double(RFC822Epochs.fri26Sep2025_1230z))
+        #expect(try #require(update.releaseDate).timeIntervalSince1970 == Double(RFC822Epochs.fri26Sep2025T1230z))
     }
 
     @Test
@@ -228,7 +227,7 @@ struct SparkleSourceTests {
         // Release notes: <description> HTML kept as-given (CDATA content verbatim).
         #expect(update.releaseNotes == "<p>Initial release of <b>Demo</b>.</p>")
         // Single-digit-day RFC822 pubDate parsed.
-        #expect(update.releaseDate!.timeIntervalSince1970 == Double(RFC822Epochs.sun5Jan2025_0900plus1h))
+        #expect(try #require(update.releaseDate).timeIntervalSince1970 == Double(RFC822Epochs.sun5Jan2025T0900plus1h))
     }
 
     @Test

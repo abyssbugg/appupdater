@@ -58,7 +58,7 @@ struct CliMain {
             switch arg {
             case "scan", "check", "install":
                 if positionalModeCount > 0 {
-                    FileHandle.standardError.write("error: mode specified twice\n".data(using: .utf8)!)
+                    errLine("error: mode specified twice\n")
                     exit(2)
                 }
                 mode = arg
@@ -133,28 +133,28 @@ struct CliMain {
                 guard apps.count == 1, let target = apps.first else {
                     let matched = apps.map { $0.name }.joined(separator: ", ")
                     let listing = matched.isEmpty ? "" : ": \(matched)"
-                    FileHandle.standardError.write(
+                    errLine(
                         "install target discipline: the filter must match exactly ONE installed app (matched \(apps.count)\(listing)).\n"
-                            .data(using: .utf8)!)
+                    )
                     exit(2)
                 }
                 guard let check = checks.first else {
-                    FileHandle.standardError.write("install refused: nothing was checked\n".data(using: .utf8)!)
+                    errLine("install refused: nothing was checked\n")
                     exit(1)
                 }
                 guard check.verdict == "update", let update = check.resolved else {
-                    FileHandle.standardError.write(
+                    errLine(
                         "install refused: no newer claim to install (verdict '\(check.verdict)') — never installs from a missing or non-newer claim.\n"
-                            .data(using: .utf8)!)
+                    )
                     exit(3)
                 }
                 let plan: InstallPlan
                 do {
                     plan = try InstallPlanner().plan(app: target, update: update)
                 } catch {
-                    FileHandle.standardError.write(
+                    errLine(
                         "install refused (plan rejected: \(error)) — nothing was touched.\n"
-                            .data(using: .utf8)!)
+                    )
                     exit(3)
                 }
 
@@ -203,13 +203,24 @@ struct CliMain {
             }
             try emit(InstallPlanReport(mode: mode, count: entries.count, apps: entries, applied: false), outFile)
         } catch {
-            FileHandle.standardError.write("error: \(error)\n".data(using: .utf8)!)
+            errLine("error: \(error)\n")
             exit(1)
         }
     }
 
+    /// The one place stderr bytes come from: argument and refusal messages
+    /// are literals here (always UTF-8-encodable), so if encoding somehow
+    /// ever failed, this writes nothing instead of crashing a tool that is
+    /// already reporting an error — the exit code at the call site stays
+    /// committed as the truth (forced encode would be a crash, not a receipt).
+    private static func errLine(_ text: String) {
+        if let utf8 = text.data(using: .utf8) {
+            FileHandle.standardError.write(utf8)
+        }
+    }
+
     static func printUsage(_ problem: String) -> Never {
-        FileHandle.standardError.write("error: \(problem)\n\n\(usage)\n".data(using: .utf8)!)
+        errLine("error: \(problem)\n\n\(usage)\n")
         exit(2)
     }
 

@@ -222,13 +222,14 @@ public struct MenuData: Sendable, Equatable {
         return lines
     }
 
-    /// Fixed-width UTC clock "HH:mm" for a date, computed with value types
-    /// only (no mutable DateFormatter instance, no locale, no `Date()`).
+    /// Fixed-width UTC clock "HH:mm" for a date, computed with pure integer
+    /// math on the Unix epoch (no Calendar/TimeZone optionals to crash on,
+    /// no mutable DateFormatter instance, no locale, no `Date()`).
     static func clockText(_ date: Date) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let components = calendar.dateComponents([.hour, .minute], from: date)
-        return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+        let seconds = Int(date.timeIntervalSince1970)
+        let hour = (seconds / 3600) % 24
+        let minute = (seconds / 60) % 60
+        return String(format: "%02d:%02d", hour, minute)
     }
 
     /// Deterministic countdown ("in 2h 25m" / "in 45m" / "in <1m"), whole

@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Evidence line: the locked local toolchain is Xcode 27-beta / Swift 6.4
+      # (AGENTS.md "Stack freeze"). Hosted-runner Xcode availability for that
+      # exact version is UNVERIFIED until this workflow's first live run —
+      # the version print below is the required first-run evidence. If the
+      # runner toolchain differs, the run must still be green on the runner's
+      # toolchain OR fail honestly; any behavioral divergence becomes a
+      # gotcha-ledger entry rather than a hidden waiver.
+      - name: Toolchain evidence
+        run: swift --version
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Test (Swift Testing only; gate requires nonzero test count)
+        run: |
+          swift test 2>&1 | tee /tmp/test.log
+          grep -qE "Test run with [1-9][0-9]* tests" /tmp/test.log || {
+            echo "::error::test count line missing or zero — XCTest discovery is broken on the beta toolchain; this matrix catches silent gaps"
+            exit 1
+          }
+
+      # swiftlint on hosted runners: installed via brew here (same brew scope
+      # as release plumbing §3). Correctness-relevant rules bite; style stays warning.
+      - name: swiftlint (correctness rules are errors)
+        run: |
+          brew install swiftlint
+          swiftlint --quiet || true
+          swiftlint lint --strict --quiet | grep -E "(force_cast|force_try|force_unwrapping).*(error)" && {
+            echo "::error::correctness-relevant lint violations present"
+            exit 1
+          } || echo "no correctness-relevant violations"
