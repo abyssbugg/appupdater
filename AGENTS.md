@@ -117,7 +117,7 @@ launch: open build/AppUpdater.app && pgrep -fl 'AppUpdater$'   # PROVEN launch o
 swift run appupdater-cli scan                  # PROVEN 82 apps inventoried from real /Applications (docs/evidence/phase4-scan.json)
 swift run appupdater-cli check --apps MacUpdater,AdGuard,Chrome,Ghostty   # PROVEN honest verdicts (Ghostty=update 1.3.1, MacUpdater=current, AdGuard/Chrome=unknown) (docs/evidence/phase4-check.json)
 swift run appupdater-cli install --apps Ghostty --out docs/evidence/phase4-installplan.json   # PROVEN real 9-step dmg plan, applied:false (dry-run)
-swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest refusal exit=3 (verdict 'current'); --apps DoesNotExist123 --apply → exit=2; ~/Library/Application Support/AppUpdater verified UNCHANGED by both (dir legitimately exists from the app's own run; refusals added no install artifacts) (docs/evidence/phase4-refuse-*.json)
+swift run appupdater-cli install --apps MacUpdater --apply   # PROVEN honest refusal exit=3 (verdict 'current'); --apps DoesNotExist123 --apply → exit=2; ~/Library/Application Support/AppUpdater verified UNCHANGED by both (dir legitimately exists from the app's own run; refusals add no install artifacts; refusal runs write no output file — exit precedes any artifact by design)
 ```
 
 - swiftlint is still NOT installed (`brew install swiftlint` pending) — that gate line stays unverified and is treated as debt, not skipped silently.

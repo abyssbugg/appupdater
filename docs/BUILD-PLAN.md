@@ -100,7 +100,8 @@ stays the per-app owner CLI action (consent boundary, unchanged from Phase 3).
   verdict honesty unchanged), `phase4-installplan.json` (Ghostty → real 9-step dmg plan,
   `applied: false`) • refusals re-proven: `--apps DoesNotExist123 --apply` → exit 2, `--apps
   MacUpdater --apply` → exit 3 (verdict `current`, no newer claim), `~/Library/Application
-  Support/AppUpdater` unchanged by both (`phase4-refuse-*.json`) • bundle/sign/launch gate green
+  Support/AppUpdater` unchanged by both (refusal exits write no output file — exit precedes any
+  artifact by design) • bundle/sign/launch gate green
   (make-app release, codesign strict OK, plutil OK) • LIVE APP: fresh launch with schedule.json
   deleted → first-ever fire recorded `lastFireWasCatchUp: false`, `lastFireAt` set, appsChecked=82,
   no error, app scanned the REAL /Applications (82 apps) autonomously; clean quit; 0 crash reports.
