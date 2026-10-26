@@ -115,9 +115,26 @@ narrative: `docs/archive/AGENT_LOG.md` close-out entry.
   but remain undone now that the engine/UI gates are green — they carry forward as named open items
   in AGENTS.md and stay on the clock; no part of the completion claim above covers them.
 
-## Phase 5 — Self-update (Sparkle 2)
+## Phase 5 — Self-update (Sparkle 2) — ✅ DONE (2026-10-26, gate proven)
 Gate: appcast + EdDSA-signed artifact verified by sparkle CLI; signed by available identity
 (personal-use signed; notarization slot documented for future).
+Gate status: **MET with live evidence.** Sparkle 2.10.1 pinned via SwiftPM (exact version;
+`AppUpdaterCore` stays dependency-free; only the app target depends on Sparkle).
+- App wiring: `SelfUpdateCoordinator` (`SPUStandardUpdaterController`, long-lived) + menu-bar
+  "Check for Self-Update…" action; automatic checks hard-off (`SUEnableAutomaticChecks=false` —
+  no hidden network); `SUFeedURL` defaults to an honest `.invalid` placeholder (checks fail with
+  unreachable-host, never fake success); `SUPublicEDKey` baked in.
+- Bundle: `Sparkle.framework` embedded by `make-app.sh` (+ `@executable_path/../Frameworks` rpath
+  added pre-sign; nested adhoc signing order framework→app); app + framework both strict-sign-valid;
+  live launch with the Sparkle engine running: no crash, clean quit, 0 crash reports.
+- Signature chain PROVEN (`docs/evidence/phase5-sparkle-verify.txt`, `phase5-appcast.xml`):
+  `sign_update -p` signature → `sign_update --verify` exit 0 → tampered signature exit 1
+  ("failed to pass signing verification") → `generate_appcast` independently derived the IDENTICAL
+  signature. Private key: login keychain only (never in repo); public key committed by design.
+- Runbook: `docs/RELEASE-PLUMBING.md §1b` (per-release pipeline + keychain-ACL operational fact +
+  CI note). Full suite stayed green through the integration (227 tests / 20 suites, lint 0 errors).
+- Honest boundary: no update SERVER exists yet (owner hosts the appcast when ready; feed URL is
+  env-overridable); notarization remains the documented future slot until Apple Developer enrollment.
 
 ## Phase 6 — Engineering hygiene + release plumbing
 Gate: swiftlint (install pending) + tests + CI pipeline + release checklist

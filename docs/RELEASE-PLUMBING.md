@@ -13,11 +13,48 @@
   Phase-1 note; NOT used by `Scripts/make-app.sh` today (adhoc by design —
   switching identities is a deliberate owner decision, not a default).
 - **UNVERIFIED / future:** Developer ID App + Installer certificates, hardened
-  runtime + entitlements pass, notarization (stapled), Sparkle EdDSA as a
-  SEPARATE key material (never the codesign identity). All of this becomes
+  runtime + entitlements pass, notarization (stapled). All of this becomes
   possible only after Apple Developer Program enrollment (open item) — the
   runbook for those steps gets written at that enrollment, not before, to
   avoid inventing steps against the wrong tools.
+
+## 1b. Sparkle EdDSA runbook (self-update signature chain) — PROVEN 2026-10-26
+
+Key material: **EdDSA (Ed25519) appcast signing is SEPARATE from code signing**
+and never substitutes for it. The PRIVATE half lives ONLY in the owner's login
+keychain (created by Sparkle's `generate_keys`; never exported into the repo).
+The PUBLIC half is not secret and is committed as the default in
+`Scripts/make-app.sh` (`SUPublicEDKey`, env-overridable).
+
+All commands use the Sparkle 2.10.1 CLI pinned by Package.swift:
+`.build/artifacts/sparkle/Sparkle/bin/{generate_keys,sign_update,generate_appcast}`
+(present after `swift package resolve`).
+
+Per-release pipeline (each step PROVEN this session — evidence:
+`docs/evidence/phase5-sparkle-verify.txt`, `docs/evidence/phase5-appcast.xml`):
+
+1. `Scripts/make-app.sh release` — assembles the bundle with
+   `Sparkle.framework` embedded (+ rpath + nested adhoc signing) and bakes
+   `SUFeedURL` + `SUPublicEDKey` + `SUEnableAutomaticChecks=false`.
+2. `ditto -c -k --keepParent AppUpdater.app <staging>/AppUpdater-<ver>.zip`.
+3. `sign_update -p <zip>` → prints the `sparkle:edSignature` for the item.
+4. `sign_update --verify <zip> <signature>` → **exit 0**; a one-character
+   mutation of the signature → **exit 1, "failed to pass signing verification"**
+   (tamper rejection proven, not assumed).
+5. `generate_appcast <staging-dir>` → writes `<AppName>-appcast.xml` with
+   sizes/versions + the EdDSA signature it derives itself (it reproduced the
+   exact signature from step 3 — a second, independent verification path).
+
+Operational fact (PROVEN): the first keychain-backed `sign_update` invocation
+blocks on a SecurityAgent "Always Allow" prompt for the Sparkle signing key —
+one-time per tool per ACL; granted 2026-10-26 on this machine. Headless/CI
+hosts must either pre-provision that ACL or switch the pipeline to
+`--ed-key-file` with a protected key file OUTSIDE the repo.
+
+Boundaries: `SUFeedURL` defaults to `https://releases.appupdater.invalid/…`
+(`.invalid` never resolves → checks fail honestly); automatic checks are
+hard-off; the app installs an update ONLY when the appcast item carries a
+signature verifying against the embedded public key.
 
 ## 2. Release checklist (per release, incl. self-updates)
 

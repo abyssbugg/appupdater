@@ -4,6 +4,7 @@ import AppUpdaterCore
 
 struct MenuBarView: View {
     let showMainWindow: () -> Void
+    let checkForSelfUpdate: () -> Void
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
@@ -41,6 +42,14 @@ struct MenuBarView: View {
                 Text("Install Now stages the owner-run CLI command (⌘ copies); the app never applies it itself.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+
+            Divider().padding(.vertical, 3)
+
+            // Self-update (Phase 5): the ONLY automatic code-update path in this
+            // app, gated on the owner's explicit click (auto-checks stay off).
+            Button("Check for Self-Update…") {
+                checkForSelfUpdate()
             }
 
             Divider().padding(.vertical, 3)

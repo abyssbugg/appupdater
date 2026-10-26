@@ -1,0 +1,14 @@
+# Phase 5 self-update evidence — 2026-10-26 (Sparkle 2.10.1)
+
+## sign_update --verify (valid signature)
+exit=0
+
+## sign_update --verify (tampered signature — must fail)
+Error: failed to pass signing verification.
+exit=1
+
+## signature used (from sign_update -p on build/release/AppUpdater-0.1.0.zip)
+/0OgYUA1lETxQfEetOIaD1Ie5j0TE6FpmDSB2hgO+gkbExZarmuXjs2ZmM7dikHqBTkOY5VnD7oG1NegDPD3Cg==
+
+## public EdDSA key (SUPublicEDKey in Info.plist; private half: login keychain only)
+MHC1fFI4O3w/kNBDff8VIxJaJ/vkpyUrKiNvr73n2nw=

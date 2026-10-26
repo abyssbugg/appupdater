@@ -1,6 +1,16 @@
 #!/bin/sh
 # Assembles build/AppUpdater.app from the swift build output (menu-bar + window app).
 # Usage: Scripts/make-app.sh [release|debug]
+#
+# Phase 5 (self-update): embeds Sparkle.framework and configures the Sparkle
+# Info.plist keys. Env knobs (all optional):
+#   APPUPDATER_FEED_URL       — SUFeedURL for self-update checks.
+#                               Default: https://releases.appupdater.invalid/appupdater-appcast.xml
+#                               (.invalid never resolves → checks fail honestly, never fake success)
+#   APPUPDATER_PUBLIC_ED_KEY  — SUPublicEDKey (Sparkle EdDSA public key). When unset the key is
+#                               OMITTED and Sparkle refuses to install updates (honest security floor).
+# Automatic checks are hard-off (SUEnableAutomaticChecks=false): self-update runs only
+# through the explicit "Check for Self-Update…" menu action.
 set -euo pipefail
 
 CONFIG=${1:-release}
@@ -8,9 +18,20 @@ swift build -c "$CONFIG"
 
 APP=build/AppUpdater.app
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
 cp ".build/$CONFIG/AppUpdaterApp" "$APP/Contents/MacOS/AppUpdater"
+
+# Sparkle.framework embed (binary xcframework artifact from the SwiftPM checkout).
+# The binary links @rpath/Sparkle.framework/Versions/B/Sparkle and carries no
+# usable rpath for a bundle layout, so the rpath must be added BEFORE signing.
+SPARKLE_FW_SRC=".build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+if [ ! -d "$SPARKLE_FW_SRC" ]; then
+    echo "error: Sparkle framework artifact missing at $SPARKLE_FW_SRC (run: swift package resolve)" >&2
+    exit 1
+fi
+cp -R "$SPARKLE_FW_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/AppUpdater"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,5 +55,19 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+PB=/usr/libexec/PlistBuddy
+$PB -c "Add :SUEnableAutomaticChecks bool false" "$APP/Contents/Info.plist"
+FEED_URL="${APPUPDATER_FEED_URL:-https://releases.appupdater.invalid/appupdater-appcast.xml}"
+$PB -c "Add :SUFeedURL string $FEED_URL" "$APP/Contents/Info.plist"
+# PUBLIC EdDSA key (safe to commit — the private half lives ONLY in the owner's
+# login keychain, created by Sparkle's generate_keys; never in the repo).
+PUBLIC_ED_KEY="${APPUPDATER_PUBLIC_ED_KEY:-MHC1fFI4O3w/kNBDff8VIxJaJ/vkpyUrKiNvr73n2nw=}"
+$PB -c "Add :SUPublicEDKey string $PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
+
+# Sign nested code first, then the outer bundle (Sparkle validates its own
+# helpers' signatures at runtime). Ad-hoc personal-use signing for now —
+# Developer ID + notarization is the documented future slot (no distribution
+# claims until the owner enrolls: AGENTS.md LOCKED decision 9).
+codesign --force --deep --sign - "$APP/Contents/Frameworks/Sparkle.framework" >/dev/null 2>&1
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 echo "Assembled: $APP"

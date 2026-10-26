@@ -5,6 +5,22 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-26 — Phase 5 (Self-update, Sparkle 2) COMPLETE — EdDSA chain proven end-to-end
+
+**Confirmed (live evidence, this session):**
+1. **Sparkle 2.10.1 integrated** via SwiftPM (exact pin; latest stable tag verified by `git ls-remote` before pinning). Only the app target depends on Sparkle; `AppUpdaterCore` stays dependency-free (LOCKED decision 8). Build green with the binary xcframework artifact.
+2. **App wiring:** `SelfUpdateCoordinator` (long-lived `SPUStandardUpdaterController`) + menu-bar "Check for Self-Update…" action. Automatic checks HARD-OFF (`SUEnableAutomaticChecks=false`) — no hidden network until the owner configures a real feed; `SUFeedURL` defaults to `https://releases.appupdater.invalid/…` (unreachable-host failure = honest, never fake success).
+3. **Bundle surgery (make-app.sh):** `Sparkle.framework` embedded from the xcframework artifact; `@executable_path/../Frameworks` rpath added BEFORE signing (the SPM-linked binary carries no usable rpath); nested adhoc signing (framework with `--deep`, then the app). App + framework both `codesign -v --strict` valid; live launch with the Sparkle engine running: no crash, clean quit, 0 crash reports.
+4. **EdDSA signature chain PROVEN** (`docs/evidence/phase5-sparkle-verify.txt`, `phase5-appcast.xml`): `generate_keys` created the keypair in the login keychain (private half NEVER in the repo; public key committed as the make-app.sh default — it is not secret); `sign_update -p` signed `build/release/AppUpdater-0.1.0.zip`; `sign_update --verify` → **exit 0**; one-character signature mutation → **exit 1 "failed to pass signing verification"** (tamper rejection with a real exit code, not assumed); `generate_appcast` independently derived the IDENTICAL signature (second verification path) and emitted `appupdater-appcast.xml` with correct version/size/minimumSystemVersion.
+5. **Operational fact captured:** the first keychain-backed `sign_update` blocks on a SecurityAgent prompt; granted "Always Allow" once on this machine (headless runs otherwise hang). CI must pre-provision the ACL or use `--ed-key-file` with a protected key file outside the repo. Recorded in `docs/RELEASE-PLUMBING.md §1b` (full per-release runbook, all steps PROVEN).
+6. **Full gate through the integration:** 227 tests / 20 suites exit 0; lint 0 error-severity hits. Phase-6 deliverables (runbook §1b, CI workflow) ride the same push.
+
+**Honest boundaries:** no update server exists — the appcast is a locally generated, locally verified artifact; hosting + a real feed URL is an owner decision (env-overridable `APPUPDATER_FEED_URL`); notarization remains a documented future slot until Apple Developer Program enrollment (LOCKED decision 9).
+
+**Next:** Phase 6 (hygiene/release plumbing — lint + runbook now real, CI unverified until first run) and Phase 7 (privileged helper — BLOCKED on owner sign-off of `docs/threat-model/PRIVILEGED-HELPER-REVIEW.md`, locked rule: the reviewer does not self-approve).
+
+---
+
 ## 2026-10-26 — Close-out: open-item lanes landed (notifications / caskalias / retention / channels) + lint gate real + scheduler-test flake root-caused
 
 **Context:** the original session (opencode `ses_e8960d549ffeksiNUeRT7Fm6ra`) died on a provider free-limit mid-fan-out after `lane/notifications` merged (`22956ee`). This session resumed per CLAUDE.md §5 ("always `git status` a dead or silent agent's lane before re-dispatching"): two lanes had complete-but-uncommitted WIP in their worktrees (retention: 412 lines / 3 owned files; channels: 310 lines / 5 owned files), one lane was complete-but-unmerged (caskalias `ae3d32b`), and the coordinator's Phase-6 prep was uncommitted on main.
