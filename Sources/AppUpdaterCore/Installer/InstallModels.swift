@@ -113,13 +113,24 @@ public struct InstallOutcome: Codable, Hashable, Sendable {
     /// What the swapped bundle now claims, straight from a post-scan read of the bundle.
     public var finalInstalledShortVersion: String?
     public var backup: BackupReceipt?
+    // AMENDMENT RECORD: coordinator-owned frozen type, additive amendment 2026-10-26
+    // lane retention, decode-tolerant for older JSON (optional field, synthesized
+    // {en,de}codeIfPresent — every previously written report still decodes).
+    /// BACKUP RETENTION v1 hygiene note from the coordinator (decision recorded at
+    /// the InstallCoordinator head): nil = retention disabled (`retentionKeep: nil`)
+    /// OR the apply never reached the green retention point (refusal/abort paths
+    /// never prune); non-nil = what the best-effort prune kept/pruned, or
+    /// "retention skipped: <reason>" when the prune itself failed. Hygiene only —
+    /// never alters `success` semantics, receipts or exit codes.
+    public var retentionNote: String?
 
-    public init(plan: InstallPlan, receipts: [StepReceipt], abortedStep: InstallStep?, finalInstalledShortVersion: String?, backup: BackupReceipt?) {
+    public init(plan: InstallPlan, receipts: [StepReceipt], abortedStep: InstallStep?, finalInstalledShortVersion: String?, backup: BackupReceipt?, retentionNote: String? = nil) {
         self.plan = plan
         self.receipts = receipts
         self.abortedStep = abortedStep
         self.finalInstalledShortVersion = finalInstalledShortVersion
         self.backup = backup
+        self.retentionNote = retentionNote
     }
 }
 
