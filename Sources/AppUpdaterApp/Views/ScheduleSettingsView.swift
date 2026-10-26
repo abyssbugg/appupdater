@@ -42,6 +42,26 @@ struct ScheduleSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // Notifications (v1 policy, decided 2026-10-26): the toggle is
+            // the master switch for the LOCAL summary; the honest status
+            // line (nil = normal) shows verbatim failure facts; the caption
+            // states the scheduled-fire-only diff policy.
+            Toggle(
+                "Notify about newly discovered updates",
+                isOn: Binding(
+                    get: { appState.notificationsEnabled },
+                    set: { appState.setNotificationsEnabled($0) }))
+            if let state = appState.notificationsState {
+                Text(state)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+            Text("Scheduled checks only — the first check after launch sets the baseline and stays quiet; only newly pending apps surface.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
             if let failure = appState.scheduleError {
                 Text(failure)
                     .font(.caption)

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 import AppUpdaterCore
 
 /// Shared observable bridge + Phase-4 coordinator wiring: the menu-bar
@@ -19,6 +20,17 @@ import AppUpdaterCore
 /// - Manual Check Now refreshes the list but does NOT touch ScheduleState:
 ///   that state describes SCHEDULED fires only (a manual check is not a
 ///   schedule event and must not shift the catch-up machinery's anchor).
+///   The SAME boundary covers notifications: a manual refresh never posts
+///   the distributed fire event, never advances
+///   ``lastScheduledPendingNames`` and never advises the local-notification
+///   decider — scheduled fires only.
+/// - Notifications (v1 policy, decided 2026-10-26): each scheduled fire
+///   completion posts the documented distributed event (see
+///   `NotificationNames`) and — ONLY when the fire-to-fire decider says
+///   `newlyPending` AND the user's toggle is on — asks macOS for
+///   authorization and posts ONE summary. Denial is stated honestly, never
+///   faked as success. Ask-per-fire (with `deliverImmediately: false`) keeps
+///   the flow boring; macOS itself caches the user's standing answer.
 /// - Schedule.json persistence is real (ScheduleFileStore): every engine
 ///   snapshot lands on disk; the UI's schedule lines always reflect the
 ///   last snapshot the engine emitted.
@@ -97,6 +109,24 @@ final class AppState: ObservableObject {
     /// never runs it.
     @Published private(set) var lastInstallCommand: String?
 
+    /// Master switch for the LOCAL summary notification (settings pane
+    /// toggle; default ON). The distributed fire event is NOT gated on this
+    /// — it is the unconditional scriptability surface and fires after every
+    /// scheduled fire regardless. Read by the settings pane; written only
+    /// via ``setNotificationsEnabled`` (the Binding in the view wires get/set
+    /// explicitly — `private(set)` cannot be exposed as a raw `$`-binding
+    /// across files on this toolchain).
+    @Published private(set) var notificationsEnabled = true
+
+    /// Honest status line for the settings pane: `nil` = normal (no failure
+    /// to report). Set ONLY to verbatim failure facts — authorization denial
+    /// ("macOS denied notification permission — enable it in System
+    /// Settings") or a posting failure with the verbatim reason. Success
+    /// clears it back to nil. Never a fake success message; the line stays
+    /// as the LAST-KNOWN outcome (toggling the switch alone does not erase a
+    /// past denial — the next fire's outcome is what overwrites it).
+    @Published private(set) var notificationsState: String?
+
     // MARK: Composition root
 
     /// Window list view model, wired to the REAL refresh + rule seams below
@@ -117,6 +147,13 @@ final class AppState: ObservableObject {
     private var lastApps: [InstalledApp] = []
     private var lastChecks: [UpdateCheck] = []
     private var engineTask: Task<Void, Never>?
+
+    /// The pending NAME set recorded by the previous SCHEDULED fire
+    /// (nil = never ran since launch) — the decider's baseline. MANUAL
+    /// Check Now never mutates this (same exclusivity as ScheduleState:
+    /// scheduled fires only). Feeding it to `NotificationDecider.advise`
+    /// decides whether this fire is worth a local notification.
+    private var lastScheduledPendingNames: [String]? = nil
 
     init(
         rulesDirectory: URL? = nil,
@@ -247,6 +284,15 @@ final class AppState: ObservableObject {
     /// The automatic path NEVER installs anything — it can only produce
     /// rows (`updateAvailable` flags). Installs are the owner's explicit
     /// CLI action; this seam has no access to any installer type at all.
+    /// After EITHER branch completes, the notification side-effects run:
+    /// the unconditional distributed event + the decider-gated local
+    /// summary. If the scan/checks THREW above, no branch completed —
+    /// nothing is posted and no baseline is advanced (an event a failed fire
+    /// would fake success; the engine records the error into ScheduleState
+    /// instead).
+    ///
+    /// MANUAL path note (LOCKED): `pipelineRows()` (Check Now) posts nothing
+    /// and touches ``lastScheduledPendingNames`` — scheduled fires only.
     func scheduledFire(_ ids: [String]?) async throws -> Int {
         let apps = try await ProductionAppScanner().scan(directoryURLs: scanDirectories)
         if let ids {
@@ -257,13 +303,126 @@ final class AppState: ObservableObject {
             ).checkAll(apps: targets)
             lastApps = apps
             lastChecks = checks
-            await list.setRows(await rules.evaluate(apps: apps, checks: checks))
+            let evaluated = await rules.evaluate(apps: apps, checks: checks)
+            await list.setRows(evaluated)
+            await recordScheduledFireOutcome(
+                appsChecked: targets.count, pendingNames: pendingNames(in: evaluated))
             return targets.count
         }
         lastApps = apps
         lastChecks = []
-        await list.setRows(await rules.evaluate(apps: apps, checks: []))
+        let evaluated = await rules.evaluate(apps: apps, checks: [])
+        await list.setRows(evaluated)
+        await recordScheduledFireOutcome(
+            appsChecked: apps.count, pendingNames: pendingNames(in: evaluated))
         return apps.count
+    }
+
+    // MARK: Scheduled-fire notification side-effects (both branches)
+
+    /// Per-app display names of the pending rows a fire produced
+    /// (updateAvailable == true). Pure transform over the evaluated rows —
+    /// read from the fire's OWN rows, never from `list.rows`, so a manual
+    /// refresh racing a scheduled fire can never bleed into this decision.
+    private func pendingNames(in rows: [AppRow]) -> [String] {
+        rows.filter { $0.updateAvailable }.map { $0.app.name }
+    }
+
+    /// The one place per scheduled-fire completion. Order is deliberate:
+    /// 1. The UNCONDITIONAL distributed event (scriptability contract in
+    ///    `NotificationNames` — both branches, regardless of any decision).
+    /// 2. The fire-to-fire decision (nil baseline suppresses), then the
+    ///    new pending set becomes the stored baseline EVEN when suppressed —
+    ///    the next fire must diff against THIS fire, whatever this fire did.
+    /// 3. Local summary ONLY for `newlyPending` AND ``notificationsEnabled``.
+    ///
+    /// wasCatchUp is passed nil on honest purpose: the engine records the
+    /// fire's catch-up identity into ScheduleState AFTER the fire returns,
+    /// so `schedule.state.lastFireWasCatchUp` read here would be the
+    /// PREVIOUS fire's flag — "unknown" beats a stale or invented fact.
+    /// `error` is nil at every posting site: this runs on the success path
+    /// only (documented in NotificationNames).
+    private func recordScheduledFireOutcome(
+        appsChecked: Int, pendingNames: [String]
+    ) async {
+        let userInfo = NotificationNames.scheduledFireUserInfo(
+            appsChecked: appsChecked,
+            pendingCount: pendingNames.count,
+            wasCatchUp: nil,
+            error: nil)
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name(NotificationNames.eventName),
+            object: nil,
+            userInfo: userInfo,
+            deliverImmediately: false)
+
+        let advice = NotificationDecider.advise(
+            previousScheduledPending: lastScheduledPendingNames,
+            currentPending: pendingNames)
+        lastScheduledPendingNames = pendingNames
+
+        guard case .newlyPending(let newNames) = advice,
+              notificationsEnabled
+        else { return }
+        await postScheduledFireSummaryNotification(newNames: newNames)
+    }
+
+    /// The local ONE-per-fire summary. Ask-per-fire keeps the flow boring
+    /// and the honesty surface single-purpose: every outcome lands verbatim
+    /// in ``notificationsState`` (denial is NOT success — no fake green).
+    ///
+    /// IDENTIFIER CHOICE (decided, 2026-10-26): a per-fire UUID. A
+    /// deterministic id (hash of the name set) was considered for System
+    /// Settings dedupe, but the app target would need a CryptoKit import to
+    /// build it and the coordinator decided UUID + documented Settings
+    /// behavior. Consequence, stated honestly: identical repeat updates
+    /// across fires are NOT collapsed by an identifier we control; macOS
+    /// applies its own coalescing we do not guarantee.
+    private func postScheduledFireSummaryNotification(newNames: [String]) async {
+        let center = UNUserNotificationCenter.current()
+        let granted: Bool
+        do {
+            granted = try await center.requestAuthorization(options: [.alert])
+        } catch {
+            notificationsState = "notification authorization failed — \(error)"
+            return
+        }
+        guard granted else {
+            notificationsState =
+                "macOS denied notification permission — enable it in System Settings"
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "AppUpdater: \(newNames.count) app updates available"
+        content.body = summaryBody(for: newNames)
+        do {
+            try await center.add(
+                UNNotificationRequest(
+                    identifier: UUID().uuidString,
+                    content: content,
+                    trigger: nil))
+            notificationsState = nil
+        } catch {
+            notificationsState = "notification posting failed — \(error)"
+        }
+    }
+
+    /// The summary body: up to ~5 names, then an honest "…" (the title
+    /// already carries the exact count, so the ellipsis hides nothing the
+    /// user cannot read in the window list — the count is stated, the rest
+    /// is the stable sorted order).
+    private func summaryBody(for names: [String]) -> String {
+        let displayLimit = 5
+        let shown = names.prefix(displayLimit).joined(separator: ", ")
+        return names.count > displayLimit ? shown + ", …" : shown
+    }
+
+    /// Settings-pane writer for ``notificationsEnabled`` (the view binds a
+    /// get/set Binding to this — see the property's doc note). Does NOT
+    /// touch ``notificationsState``: the status line is the last-KNOWN
+    /// outcome, not an assertion about the next one.
+    func setNotificationsEnabled(_ enabled: Bool) {
+        notificationsEnabled = enabled
     }
 
     // MARK: Refresh + rule pipelines (the VM's real seams live here)
@@ -271,6 +430,12 @@ final class AppState: ObservableObject {
     /// The full refresh pipeline: scan → per-app source lookups → rules
     /// evaluation → rows. Runs on Check Now (menu + window) and behind the
     /// VM's refresh seam.
+    ///
+    /// NOTIFICATION BOUNDARY (LOCKED, scheduled-fires-only): this path
+    /// NEVER posts the distributed fire event, never advances
+    /// ``lastScheduledPendingNames`` and never advises the local
+    /// notification decider — a manual nudge must never fake a schedule
+    /// event or tune the scheduled-fire baseline.
     func pipelineRows() async throws -> [AppRow] {
         let apps = try await ProductionAppScanner().scan(directoryURLs: scanDirectories)
         let checks = await UpdateCheckEngine(
