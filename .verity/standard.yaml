@@ -2,11 +2,11 @@ version: 1.0.0
 created_by: verity-cli
 knowledge_spec:
   project_name: appupdater
-  languages: []
-  frameworks: []
+  languages: [swift]
+  frameworks: [sparkle, swiftui, appkit, cryptoKit]
   architecture: monolith
-  build_system: ""
-  test_framework: ""
+  build_system: swift-pm
+  test_framework: swift-testing
 quality_dimensions:
   - id: comprehensibility
     description: Code readable in one context load
