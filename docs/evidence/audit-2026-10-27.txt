@@ -1,0 +1,85 @@
+# Live audit evidence — 2026-10-27 (independent re-verification of the requested numbers before any completion claim)
+
+Every stage was executed THIS session on main (`9bf6546`, clean tree, local == origin/main).
+Reported verdicts elsewhere in this session cite this file.
+
+---
+## Stage log A–J (verbatim, /tmp/audit_gate_all.log)
+
+== A: git state
+## main...origin/main
+9bf6546 toolchain batch: CircleCI pipeline + CodeRabbit + Codacy + Verity + Sourcery wired
+== B: swift build (debug)
+BUILD_EXIT=0
+== C: swift test
+TEST_EXIT=0
+✔ Test run with 227 tests in 20 suites passed after 17.795 seconds.
+== D: swiftlint error-severity count
+LINT_ERROR_HITS=0
+== E: make-app release
+MAKEAPP_EXIT=0
+[20 / 29] appupdater-cli-product
+[22 / 31] appupdater-cli
+[24 / 30] AppUpdaterApp
+Build complete! (9.49 sec)
+Assembled: build/AppUpdater.app
+== F: codesign strict
+CODESIGN_EXIT=0
+== G: plutil
+build/AppUpdater.app/Contents/Info.plist: OK
+PLUTIL_EXIT=0
+== H: live launch
+PGREP:
+17295 /Users/datamatics/dev/appupdater/build/AppUpdater.app/Contents/MacOS/AppUpdater
+CRASH_BEFORE=0 CRASH_AFTER=0
+== I: CLI refusals
+REFUSAL_UNKNOWN_EXIT=2
+install target discipline: the filter must match exactly ONE installed app (matched 0).
+
+REFUSAL_CURRENT_EXIT=3
+install refused: no newer claim to install (verdict 'current') — never installs from a missing or non-newer claim.
+
+== J: sparkle sign_update availability
+.build/artifacts/sparkle/Sparkle/bin/sign_update
+.build/artifacts/sparkle/Sparkle/bin/old_dsa_scripts/sign_update
+AUDIT-GATE-DONE
+
+---
+## K1: recorded phase-5 zip — EdDSA signature determinism + verify vs the recorded signature
+
+Command: `.build/artifacts/sparkle/Sparkle/bin/sign_update -p build/release/AppUpdater-0.1.0.zip`
+raw -p old: /0OgYUA1lETxQfEetOIaD1Ie5j0TE6FpmDSB2hgO+gkbExZarmuXjs2ZmM7dikHqBTkOY5VnD7oG1NegDPD3Cg==
+DETERMINISTIC_MATCH=yes          # byte-equal to docs/evidence/phase5-sparkle-verify.txt recorded signature
+OLD_ZIP_VERIFY_EXIT=0            # sign_update --verify <recorded zip> <recorded signature>
+
+---
+## K2: fresh chain from today's rebuilt bundle (stage E rebuilt build/AppUpdater.app)
+
+Command order per RELEASE-PLUMBING §1b (1): `ditto -c -k --keepParent build/AppUpdater.app <staging>/AppUpdater-0.1.0.zip`
+raw -p fresh: q4F1EY5/FJy2jzYiUU7wl/EGvjnEROdLqJkFISqD1KkTYXuA/cadogRbPcPGDjMfVVcLdG0By9mi3vbPo6/3Bg==
+FRESH_VERIFY_EXIT=0              # sign_update --verify <fresh zip> <fresh signature>
+TAMPER_VERIFY_EXIT=1             # one appended byte → verification FAILS (Error: failed to pass signing verification.)
+
+(K2 note: a first attempt used `ditto --sequesterDir`, which this OS stripped from
+ditto's accepted options — runbook line 39 flag set was used instead, exactly as recorded.)
+
+---
+## CircleCI (2026-10-27): headless progress through the platform's new capability surface
+
+1. `circleci project get --project gh/abyssbugg/appupdater` → "No project found" (org has
+   NO VCS integration at all: `circleci org list` shows Weanime Inc with `VCS -` — it is a
+   STANDALONE org; GitHub-slug projects cannot exist there).
+2. `circleci project create appupdater --org circleci/RHaHLgciJFtxBVetTA2nyg --json` → CREATED:
+   {"id": "0c6d2ca0-20e6-41e4-a7ef-10ff8bd06465",
+    "slug": "circleci/RHaHLgciJFtxBVetTA2nyg/2Xzy1DPhZUa8tFXqPfQgYk",
+    "name": "appupdater", "organization_name": "Weanime Inc",
+    "vcs_provider": "CircleCI", "vcs_default_branch": "main"}
+3. `circleci project link --project circleci/RHaHLgciJFtxBVetTA2nyg/2Xzy1DPhZUa8tFXqPfQgYk`
+   → ✓ Linked .circleci/info.yml (committed in this session's commit).
+4. `circleci pipeline create ... --config-provider origin --checkout-provider origin` →
+   API 400: "this organization has no Origin installation". Per `circleci triggers --help`:
+   origin = the CircleCI Origin app (Cursor repositories only). Remaining repo-backed
+   providers for GitHub: github_app / github_server / github_oauth — for this repo the
+   realistic one is github_app, which REQUIRES the owner's one-click authorize at
+   app.circleci.com as `abyssbugg`. Until that click, definition create + first run remain
+   UNVERIFIED and are not claimed.

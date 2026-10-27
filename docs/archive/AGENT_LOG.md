@@ -5,6 +5,18 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-27 — Audit session: full standing gate re-proven live + CircleCI pushed to its headless limit
+
+**Confirmed (live evidence, all commands run this session; verbatim log in docs/evidence/audit-2026-10-27.txt):**
+1. Full AGENTS.md verification gate re-run independently on main (`9bf6546`, clean tree, local == origin/main): swift build exit=0; swift test → **227 tests / 20 suites, exit=0**; swiftlint → **0 error-severity hits**; `Scripts/make-app.sh release` exit=0; `codesign -v --strict` OK; plutil OK; live launch observed (PID 17295) + clean quit + 0 crash reports before/after; CLI refusals byte-honest (unknown-app exit=2, current-verdict exit=3, exact stderr texts unchanged, no artifacts written on refusal).
+2. Sparkle EdDSA chain RE-PROVEN both ways with the artifact located in-repo (`.build/artifacts/sparkle/Sparkle/bin/sign_update` — no external download needed): (K1) the recorded phase-5 zip still validates — `sign_update -p` reproduces the recorded signature byte-for-byte (deterministic EdDSA) and `--verify` vs the recorded signature → exit=0; (K2) today's freshly rebuilt bundle → zip → `sign_update -p` → `--verify` exit=0, one-appended-byte tamper → exit=1.
+3. CircleCI: project CREATE + checkout LINK now work headlessly (CLI grew the capability since 2026-10-26): `circleci project create appupdater --org circleci/RHaHLgciJFtxBVetTA2nyg` → project id `0c6d2ca0-20e6-41e4-a7ef-10ff8bd06465`; `circleci project link` → committed `.circleci/info.yml`. Root finding: Weanime Inc is a STANDALONE org (`VCS -`), so the 2026-10-26 "Project not found" diagnosis stays correct for GitHub-slug lookups. Pipeline DEFINITION create remains blocked at providers (origin = Cursor-only, API 400 "no Origin installation") — the single remaining web click is authorize the CircleCI GitHub App as `abyssbugg`; the ready-made pipeline-create/trigger/run command sequence is recorded in docs/RELEASE-PLUMBING.md §4.
+
+**Owner actions (unchanged except item 1 narrowed):** (1) authorize CircleCI GitHub App as `abyssbugg`; (2) CodeRabbit + Codacy App installs; (3) re-run `verity login --force` as `abyssbugg` (uploads stay forbidden until then); (4) Phase 7 decision-box signature in docs/threat-model/PRIVILEGED-HELPER-REVIEW.md; (5) appcast host decision; (6) Apple Developer enrollment.
+**Unverified / unchanged:** banner visibility + authorization-dialog UI remain owner-observable; GitHub Actions first green run still blocked at account level.
+
+---
+
 ## 2026-10-26 — Toolchain batch: CircleCI + CodeRabbit + Codacy + Verity + Sourcery wired (owner bindings pending where web-UI-only)
 
 **Confirmed (live evidence):**

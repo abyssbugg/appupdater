@@ -122,13 +122,37 @@ State per tool — every line PROVEN or an explicit owner-step placeholder:
   the authority on the exact hosted version; adjust the pin from the error's
   list if needed), toolchain-evidence step, `swift build`, nonzero-test-count
   test gate, swiftlint correctness gate, SPM caching.
-- **UNVERIFIED — owner web step:** the repo→CircleCI binding. The org has no
-  GitHub App connection for `abyssbugg/appupdater` (proven: `project get` →
-  "Project not found"). Fix: app.circleci.com → Weanime Inc → Project Setup →
-  connect GitHub (authorize as the `abyssbugg` GitHub account) → create the
-  project for the repo. The committed config is picked up automatically on the
-  next push; macOS execution then proves or names the plan constraint (Free
-  plan macOS availability will surface on the first run, honestly).
+- **2026-10-27 update — headless progress (PROVEN this session, evidence
+  in docs/evidence/audit-2026-10-27.txt):** the CLI's capability surface
+  grew since the 2026-10-26 diagnosis. New facts:
+  1. `circleci project get --project gh/abyssbugg/appupdater` again → "No
+     project found", and `circleci org list` reveals WHY at the root: Weanime
+     Inc is a STANDALONE org (`VCS -` — no GitHub integration at all), so a
+     GitHub-slug project cannot ever exist there.
+  2. The project + binding ARE now done, headlessly:
+     `circleci project create appupdater --org circleci/RHaHLgciJFtxBVetTA2nyg`
+     → project `appupdater`, id `0c6d2ca0-20e6-41e4-a7ef-10ff8bd06465`, slug
+     `circleci/RHaHLgciJFtxBVetTA2nyg/2Xzy1DPhZUa8tFXqPfQgYk`; then
+     `circleci project link` bound THIS checkout (committed
+     `.circleci/info.yml`).
+  3. The ONE remaining web click (narrowed, precise): a pipeline DEFINITION
+     needs a repo-backed config/checkout provider. `origin` is Cursor-only
+     here — proven: `circleci pipeline create ... --config-provider origin
+     --checkout-provider origin` → API 400 "this organization has no Origin
+     installation", and `circleci triggers --help` states origin = the
+     CircleCI Origin app (Cursor). For GitHub the fitting provider is
+     `github_app`, which requires the App authorized at app.circleci.com AS
+     `abyssbugg`. After that one click, everything else is CLI-only:
+     ```
+     circleci pipeline create --project-id 0c6d2ca0-20e6-41e4-a7ef-10ff8bd06465 \
+       --name ci --config-provider github_app --config-repo-id R_kgDOVXh9aA \
+       --config-file .circleci/config.yml --checkout-provider github_app \
+       --checkout-repo-id R_kgDOVXh9aA
+     circleci project trigger create     # push events (github_app)
+     circleci run trigger && circleci run watch
+     ```
+     The first run then proves or names the Free-plan macOS constraint
+     honestly. Until that click: no run exists, none claimed, none faked.
 
 **CodeRabbit** (AI code review):
 - CLI authenticated (2026-10-26; plan Advanced, seat assigned).

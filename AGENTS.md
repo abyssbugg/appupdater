@@ -104,7 +104,7 @@ Point at files that exist. A missing doc is a gap to flag, not a file to invent 
 
 ## Verification gate
 
-The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-26, close-out after notifications/caskalias/retention/channels lanes).**
+The standing gate CLAUDE.md §6 requires. Copy-paste commands only. **All lines below have live evidence from the most recent session (2026-10-27 audit: every line re-run independently on main as-is — 227 tests / 20 suites green, swiftlint 0 error-severity hits, bundle assembled + strict-signed + plutil-OK + live launch clean-quit + 0 crash reports, refusals byte-identical, and the Sparkle EdDSA chain re-proven BOTH ways: recorded zip deterministic-signature match + verify exit=0, and today's rebuilt bundle fresh-signed verify exit=0 / tamper exit=1. Full verbatim log: docs/evidence/audit-2026-10-27.txt).**
 
 ```
 swift build                                    # PROVEN exit=0 (close-out union)
