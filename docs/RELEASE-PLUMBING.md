@@ -238,13 +238,20 @@ State per tool — every line PROVEN or an explicit owner-step placeholder:
   `standard push`/`get`/`history` + `config service-url|git-moments|formal`; nothing
   else was owed.
 
-**Sourcery** (Swift metaprogramming/codegen):
-- 2.3.0 installed via brew; `.sourcery.yml` committed (sources: Sources,
-  templates: Scripts/SourceryTemplates, output parked in gitignored .build).
-- PROVEN run: full-tree scan finished clean (0.05s) with ZERO templates —
-  deliberate: no boilerplate repetition exists to justify generated code yet
-  (Scripts/SourceryTemplates/README.md). Add a template only when a real
-  repetition appears.
+**Sourcery** (Sourcery AI — security/review SaaS, MCP-wired):
+- CORRECTION (2026-10-27, owner-directed): the name is a collision. The brew
+  "Sourcery" installed on 2026-10-26 was Krzysztof Zabłocki's Swift
+  code-generation tool — NOT what the owner meant. The owner's tool is
+  **Sourcery AI**, the code-security/review service, integrated here through
+  its MCP server (`sourcery_list_findings`, `sourcery_security_snapshot`,
+  `sourcery_get_group`, … — SAST / IaC / secrets / dependency / license
+  findings). The brew install was uninstalled by the owner; `.sourcery.yml`
+  and `Scripts/SourceryTemplates/` were removed from the repo (commit with
+  this correction) — nothing in the codebase needs generated boilerplate.
+- Connection status: findings APIs require a connected repository. If the
+  repo is not yet connected in Sourcery's dashboard (GitHub App), connecting
+  it is an owner web step, after which `sourcery_security_snapshot` returns
+  the org-level triage view.
 
 ## 5. CI pipeline (Phase 6 gate line — GitHub Actions)
 

@@ -5,6 +5,14 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-27 — Sourcery corrected to Sourcery AI (name collision) — wrong tool's config removed
+
+**Confirmed (owner-directed):** the "Sourcery" the owner asked for is **Sourcery AI** (the code-security/review SaaS, integrated via its MCP server — SAST/IaC/secrets/dependency findings), NOT the brew `sourcery` Swift code-generation tool that was installed on 2026-10-26. The owner uninstalled the brew binary themselves; this session removed the committed `.sourcery.yml` and `Scripts/SourceryTemplates/` and corrected the record (RELEASE-PLUMBING §4 correction block, AGENTS.md toolchain entry, gotcha-ledger collision entry so no future session reinstalls the wrong tool). Nothing else referenced the codegen tool. History preserved: the 2026-10-26 batch entry below still describes what happened then, including the misinstall — never silently deleted.
+
+**Also this session:** Verity knowledge_spec v2 (owner's commit `9b5a537`) re-pushed to the cloud (`verity standard push`, server `created_at 2026-10-27T18:04:30Z` — the backlog line in AGENTS.md is closed); GitHub Actions workflow disabled (runs were failing red on every push while account-blocked; the file stays as the documented fallback).
+
+---
+
 ## 2026-10-27 — Toolchain session: hosted macOS CI FIRST GREEN + all four GitHub Apps confirmed + Verity cloud connection completed
 
 **Confirmed (live evidence this session; verbatim in docs/evidence/audit-2026-10-27.txt, end-state in docs/RELEASE-PLUMBING.md §4):**
