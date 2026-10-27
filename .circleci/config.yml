@@ -26,9 +26,9 @@ jobs:
     # branch (never silently): variant 1 = modern machine executor with an
     # explicit macOS image, no resource-class override (plan says S-XL sizes
     # are available; let the scheduler default the resource class).
-    machine:
-      image: macos-xcode:16.4.0
-    resource_class: macos.m1.medium.gen1
+    macos:
+      xcode: 16.4.0
+    resource_class: macos.x86.medium.gen2
     steps:
       - checkout
 
