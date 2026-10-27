@@ -18,17 +18,22 @@ version: 2.1
 
 jobs:
   build-test:
-    # Honesty iteration record (2026-10-27, first run): `macos:` + `xcode:` +
-    # `resource_class: macos.m1.medium` scheduled NOTHING — the platform's own
-    # step-level message on pipeline #1: "Resource class macos for
-    # macos.m1.medium, image xcode:16.4.0 is not available for your project, or
-    # is not a valid resource class." Iterating per that error's feedback on a
-    # branch (never silently): variant 1 = modern machine executor with an
-    # explicit macOS image, no resource-class override (plan says S-XL sizes
-    # are available; let the scheduler default the resource class).
+    # Honesty iteration record (2026-10-27, runs #1-#5, branch ci/macos-fix).
+    # Runs #1-#4 all rejected at 0s — root cause NOW IDENTIFIED via CircleCI docs
+    # (docs/guides/execute/using-macos/, updated 2026-10-15) + changelog:
+    #   - macos.m1.medium(.gen1): M1 classes END OF LIFE 2026-02-16.
+    #   - macos.x86.medium.gen2: Intel classes removed mid-2024.
+    #   - machine-executor default "large": not a macOS class.
+    #   - m4pro prefix must be WITHOUT "macos." — macos.m4pro.medium is itself
+    #     an invalid spelling (docs example: resource_class: m4pro.medium).
+    # The platform's "pricing plan does not support macos use" hint is generic
+    # boilerplate and was NOT the actual blocker. Current valid classes:
+    # m4pro.medium (200 credits/min, 6 vCPU/28GB) and m4pro.large.
+    # v5 = docs-exact form: macos: xcode: 16.4.0 + resource_class: m4pro.medium
+    # (Xcode 16.4.0 remains in the supported table with exactly these classes).
     macos:
       xcode: 16.4.0
-    resource_class: macos.x86.medium.gen2
+    resource_class: m4pro.medium
     steps:
       - checkout
 
