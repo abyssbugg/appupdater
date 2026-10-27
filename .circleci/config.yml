@@ -18,12 +18,27 @@ version: 2.1
 
 jobs:
   build-test:
-    # Pinned hosted Xcode — the pipeline's first run is the authority on what
-    # is actually available; adjust the pin from the error's "available
-    # versions" list if this exact one is not offered (honest iteration).
+    # Honesty iteration record (2026-10-27, runs #1-#5, branch ci/macos-fix).
+    # Runs #1-#4 all rejected at 0s — root cause NOW IDENTIFIED via CircleCI docs
+    # (docs/guides/execute/using-macos/, updated 2026-10-15) + changelog:
+    #   - macos.m1.medium(.gen1): M1 classes END OF LIFE 2026-02-16.
+    #   - macos.x86.medium.gen2: Intel classes removed mid-2024.
+    #   - machine-executor default "large": not a macOS class.
+    #   - m4pro prefix must be WITHOUT "macos." — macos.m4pro.medium is itself
+    #     an invalid spelling (docs example: resource_class: m4pro.medium).
+    # The platform's "pricing plan does not support macos use" hint is generic
+    # boilerplate and was NOT the actual blocker. Current valid classes:
+    # m4pro.medium (200 credits/min, 6 vCPU/28GB) and m4pro.large.
+    # v5 = docs-exact form: macos: xcode: 16.4.0 + resource_class: m4pro.medium
+    # → run #5 SCHEDULED (first real VM start, jobs executed past checkout);
+    #   build failed sanely at the honesty gate: "package 'project' is using
+    #   Swift tools version 6.3.0 but the installed version is 6.1.0" — hosted
+    #   Xcode 16.4.0 (Swift 6.1) < Package.swift's required 6.3.0.
+    # v6 = Xcode pin 27.2.0 (docs-supported with m4pro classes; closest hosted
+    #   parity to the locked local Xcode 27-beta / Swift 6.4 toolchain).
     macos:
-      xcode: 16.4.0
-    resource_class: macos.m1.medium
+      xcode: 27.2.0
+    resource_class: m4pro.medium
     steps:
       - checkout
 
