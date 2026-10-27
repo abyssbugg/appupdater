@@ -74,6 +74,40 @@ signature verifying against the embedded public key.
 6. Tag `v<version>` on the release commit; push tag + release notes.
 7. Post-release: record the receipts (test count, evidence file names, tag) in
    `docs/archive/AGENT_LOG.md` (newest on top).
+8. ⚠ **BOTH version strings must advance or Sparkle offers nothing**:
+   Sparkle compares the RUNNING app's `CFBundleVersion` against the appcast
+   item's `sparkle:version`. `CFBundleShortVersionString` alone is not
+   compared. `Scripts/make-app.sh` currently hardcodes 0.1.0 / build 1 — a
+   next release MUST bump BOTH (e.g. 0.2.0 / build 2) or the feed is honest
+   but no update is offered.
+
+### 2b. Release record — v0.1.0 (first public release) — 2026-10-27, receipts
+
+- **Release:** https://github.com/abyssbugg/appupdater/releases/tag/v0.1.0
+  (published 2026-10-27T07:37:23Z; asset `AppUpdater-0.1.0.zip`, 1,615,042
+  bytes). Repo made public by the owner the same day → release assets and the
+  appcast fetch with no authentication.
+- **Signature chain re-proven independently on the SHIPPED artifact** (not
+  assumed from the build session): signature re-derived from the zip with
+  `sign_update -p` → identical; `sign_update --verify` → exit 0; the asset
+  DOWNLOADED from the release URL → sha256 `a7276a6694948a422899b4d335f622bab7c60807ef7aa2d1091f9e0b929a09a7`,
+  byte-identical (`cmp`) to the signed local build; Info.plist read from the
+  downloaded zip → 0.1.0 / build 1 / LSMinimumSystemVersion 15.0.
+- **Feed:** `appcast.xml` at repo root (commit `3244b29`), enclosure = the
+  release asset URL (no binary committed to the tree), values from the
+  downloaded artifact, `sparkle:hardwareRequirements arm64` honest (the build
+  has no x86_64 slice — Intel Macs are not offered updates). Feed verified
+  LIVE: `raw.githubusercontent.com/abyssbugg/appupdater/main/appcast.xml` →
+  HTTP 200 serving the XML.
+- **Baked feed URL:** the released build carries
+  `SUFeedURL = https://raw.githubusercontent.com/abyssbugg/appupdater/main/appcast.xml`
+  (make-app.sh env), `SUEnableAutomaticChecks=false` (manual menu check only),
+  EdDSA public key embedded. Ad-hoc signed, personal-use posture (LOCKED
+  decision 9) — Gatekeeper caveat documented in the release notes verbatim.
+- **Next release deltas (from this record):** bump both version strings
+  (item 8 above), `gh release create` with the new asset, re-run §1b steps
+  2–5, update `appcast.xml` with the new item (newest on top), push, verify
+  the live feed + CI green.
 
 ## 3. swiftlint policy (Phase 6 gate line)
 

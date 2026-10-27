@@ -5,6 +5,21 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-27 — Release v0.1.0 PUBLISHED — feed live; signature chain re-proven on the shipped artifact
+
+**Context:** the owner's parallel session (OpenCode) executed the release pipeline through `gh release create v0.1.0` and stopped before the feed + record. This session independently re-proved everything rather than trusting the transcript, then closed the release out.
+
+**Confirmed (live evidence, this session):**
+1. **Release state verified:** `v0.1.0` published (not draft) at https://github.com/abyssbugg/appupdater/releases/tag/v0.1.0 — asset `AppUpdater-0.1.0.zip`, 1,615,042 bytes. Repo public (owner's call, same day) → asset + feed fetch with no authentication.
+2. **Signature chain re-proven INDEPENDENTLY on the shipped artifact:** `sign_update -p` re-derived the exact signature from the local zip (matches the release session's); `sign_update --verify` → exit 0; the asset DOWNLOADED from the GitHub release URL is byte-identical (`cmp`) to the signed local build (sha256 `a7276a6694948a422899b4d335f622bab7c60807ef7aa2d1091f9e0b929a09a7`); Info.plist read from the downloaded zip → CFBundleShortVersionString 0.1.0, CFBundleVersion 1, LSMinimumSystemVersion 15.0.
+3. **Feed committed + LIVE:** `appcast.xml` at repo root (commit `3244b29`, xmllint-clean), enclosure = the release asset URL (no binary in the tree), `sparkle:hardwareRequirements arm64` honest (no x86_64 slice — Intel not offered), item values from the downloaded artifact. Verified live: `raw.githubusercontent.com/abyssbugg/appupdater/main/appcast.xml` → HTTP 200 serving the XML. The released app's baked `SUFeedURL` points exactly there; auto-checks stay off (manual menu check only).
+4. **Runbook hardened (§2):** added the warning that BOTH version strings must advance per release (Sparkle compares CFBundleVersion vs `sparkle:version` — short-version alone offers no update), plus the full v0.1.0 receipts record (§2b) and the next-release delta list.
+5. **Repo-content answer to the owner (from the release session, confirmed here):** the tree needs no trimming — 111 curated files (source, tests, scripts, docs, evidence), secrets-scan clean, junk was only the two `.DS_Store` files the release session already removed. The RELEASE itself ships two generated files (zip asset + appcast), not "the repo's files".
+
+**Honest boundaries:** ad-hoc signed, personal-use posture (LOCKED decision 9) — Gatekeeper first-launch caveat documented in the release notes verbatim; Intel Macs intentionally not offered updates; PKG apps still refuse honestly pending the privileged-helper decision (owner-gated threat-model review). The owner's previously installed dev build still points at the `.invalid` placeholder feed — it will not self-update; reinstall from the release once.
+
+---
+
 ## 2026-10-27 — Sourcery corrected to Sourcery AI (name collision) — wrong tool's config removed
 
 **Confirmed (owner-directed):** the "Sourcery" the owner asked for is **Sourcery AI** (the code-security/review SaaS, integrated via its MCP server — SAST/IaC/secrets/dependency findings), NOT the brew `sourcery` Swift code-generation tool that was installed on 2026-10-26. The owner uninstalled the brew binary themselves; this session removed the committed `.sourcery.yml` and `Scripts/SourceryTemplates/` and corrected the record (RELEASE-PLUMBING §4 correction block, AGENTS.md toolchain entry, gotcha-ledger collision entry so no future session reinstalls the wrong tool). Nothing else referenced the codegen tool. History preserved: the 2026-10-26 batch entry below still describes what happened then, including the misinstall — never silently deleted.
