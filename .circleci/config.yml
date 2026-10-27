@@ -18,12 +18,16 @@ version: 2.1
 
 jobs:
   build-test:
-    # Pinned hosted Xcode — the pipeline's first run is the authority on what
-    # is actually available; adjust the pin from the error's "available
-    # versions" list if this exact one is not offered (honest iteration).
-    macos:
-      xcode: 16.4.0
-    resource_class: macos.m1.medium
+    # Honesty iteration record (2026-10-27, first run): `macos:` + `xcode:` +
+    # `resource_class: macos.m1.medium` scheduled NOTHING — the platform's own
+    # step-level message on pipeline #1: "Resource class macos for
+    # macos.m1.medium, image xcode:16.4.0 is not available for your project, or
+    # is not a valid resource class." Iterating per that error's feedback on a
+    # branch (never silently): variant 1 = modern machine executor with an
+    # explicit macOS image, no resource-class override (plan says S-XL sizes
+    # are available; let the scheduler default the resource class).
+    machine:
+      image: macos-xcode:16.4.0
     steps:
       - checkout
 
