@@ -154,6 +154,35 @@ State per tool — every line PROVEN or an explicit owner-step placeholder:
      The first run then proves or names the Free-plan macOS constraint
      honestly. Until that click: no run exists, none claimed, none faked.
 
+- **2026-10-27 FINAL STATE — FIRST GREEN HOSTED RUN, ALL BROWSER BINDINGS DONE:**
+  1. Pipeline definition `ci` created via CLI with the GitHub-App providers using the
+     REAL repo external id `1433959784` (not the stale `R_kgDOVXh9aA` draft above):
+     definition `6d189e51-4464-44de-a1bd-1a649c3085e4` (config + checkout providers BOTH
+     `github_app`); trigger `all-pushes` `31151bfc-5576-443f-a40d-6a7fa423f34f`. The
+     CircleCI App's repo access is proven by construction (its API bound the repo on
+     both providers), matching the App installation confirmed in the owner's GitHub
+     settings (installation 83572274).
+  2. `circleci run trigger` is NOT supported for GitHub-App projects (verbatim platform
+     response ("This API is not yet supported…") recorded in the evidence file) — the
+     first run used the UI's "Run pipeline"; all later runs fired automatically from
+     the push trigger.
+  3. Scheduling trap SOLVED by honest iteration (runs #1–#5, every verbatim rejection
+     recorded in docs/evidence/audit-2026-10-27.txt): retired class names were the
+     whole story — `macos.m1.medium*` = M1 classes EOL 2026-02-16; Intel classes
+     removed mid-2024; `machine` default "large" is not a macOS class; current valid
+     classes are BARE `m4pro.medium` / `m4pro.large`. The platform's "pricing plan does
+     not support macos use" hint is generic boilerplate — the Performance plan
+     (72,320 credits remaining) was never the blocker.
+  4. Toolchain pin: hosted Xcode 16.4.0 (Swift 6.1) failed the honesty gate exactly as
+     designed — "package 'project' is using Swift tools version 6.3.0 but the installed
+     version is 6.1.0". Final pin `xcode: 27.2.0` + `resource_class: m4pro.medium` →
+     run #6 GREEN: workflow succeeded in 70s with "✔ Test run with 227 tests in 20
+     suites passed after 15.531 seconds." (verbatim match with the local standing gate)
+     + toolchain evidence line + lint correctness gate green. Hosted Swift 6.4.2 vs
+     local Xcode 27-beta 6.4 = near-parity; divergence recorded in the gotcha ledger.
+  5. Merged to main `249e627` — main's every-push config is now the PROVEN one (trials
+     happened on the branch, never silently on main).
+
 **CodeRabbit** (AI code review):
 - CLI authenticated (2026-10-26; plan Advanced, seat assigned).
 - `.coderabbit.yaml` committed: chill profile, evidence/archive paths excluded,
@@ -164,11 +193,18 @@ State per tool — every line PROVEN or an explicit owner-step placeholder:
   launched against the Phase-5 range; result filed with the session evidence).
 - **Owner web step (one click):** install the CodeRabbit GitHub App on
   `abyssbugg/appupdater` at coderabbit.ai to enable automatic PR reviews.
+- **2026-10-27 update — DONE:** the owner's GitHub settings show `coderabbitai`
+  installation 105861716, and the CodeRabbit "abyssbugg" workspace (Advanced) lists
+  `appupdater` on its Connected-repositories page (repo id 1433959784 in the settings
+  routes). Automatic PR reviews are live; CLI path unchanged.
 
 **Codacy** (cloud static analysis):
 - `codacy.yml` committed (exclusions aligned with .gitignore; swiftlint engine
   enabled, inheriting `.swiftlint.yml` — no second divergent rule set).
 - **Owner web step:** install the Codacy GitHub App on the repo at codacy.com.
+- **2026-10-27 update — DONE:** "Codacy Production" installation 106886062 confirmed in
+  GitHub settings; the dashboard at app.codacy.com/gh/abyssbugg/appupdater/dashboard is
+  live with the repo's analysis.
 
 **Verity** (AI quality gate on agent-written changes):
 - Fully initialized (owner answered the init questions: gate on agent stop,
@@ -183,13 +219,24 @@ State per tool — every line PROVEN or an explicit owner-step placeholder:
   correctness remains swiftlint's job (CI + local gate), and the AI review
   layer covers Swift semantics. This division is deliberate, not a gap.
 - `VERITY.md` at repo root.
-- **PENDING owner action:** uploads are FORBIDDEN until the Verity GitHub App
-  is authorized for `abyssbugg/appupdater`. The device-flow login was
-  completed under a DIFFERENT GitHub account than the repo owner — re-run
-  `verity login --force` and authorize AS `abyssbugg` (or grant the Verity App
-  access to the repo from the abyssbugg GitHub settings), then
-  `verity standard push` + `verity config push` + `verity memory seed`.
-  Until then Verity runs local-only (gate works, no cloud history).
+- **2026-10-27 update — CLOUD CONNECTION COMPLETE (the FORBIDDEN gap is closed):**
+  the "Verity auth" GitHub App (installation 175623405, by Codacy) was confirmed in the
+  owner's GitHub settings; the project was REGISTERED via device-flow authorization
+  completed in the owner's Chrome session signed in as `@abyssbugg` (device code
+  E8FA-32EC; the two earlier codes expired/terminated unused). `verity auth register
+  --project appupdater` → project id `5fd1fbd6-e317-4760-975d-3418a962648d`,
+  authenticated as `jlpbyakermansart@gmail.com` (abyssbugg's primary email).
+  `verity standard push` → Standard **v1** uploaded (id `04f352a6-9833-4933-b7d6-
+  a715351b4de9`, 4 quality + 7 security + 5 custom dimensions incl. the owner-approved
+  patterns). `verity memory seed` → 14 knowledge nodes. `verity config git-moments
+  commit,push` → git-moment gate ON (commit + push reviews). `verity config formal` →
+  off (Lean not installed — honest). Full evidence: docs/evidence/audit-2026-10-27.txt.
+  KNOWN REFINEMENT (not a blocker): the synthesized Standard's knowledge_spec metadata
+  fields (languages/frameworks/build_system/test_framework) are empty — edit
+  `.verity/standard.yaml` and push v2 when worth it. `config push` as documented in
+  the 2026-10-26 note does not exist in the CLI (0.34.4) — the surviving surface is
+  `standard push`/`get`/`history` + `config service-url|git-moments|formal`; nothing
+  else was owed.
 
 **Sourcery** (Swift metaprogramming/codegen):
 - 2.3.0 installed via brew; `.sourcery.yml` committed (sources: Sources,

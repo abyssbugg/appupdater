@@ -83,3 +83,63 @@ ditto's accepted options — runbook line 39 flag set was used instead, exactly 
    realistic one is github_app, which REQUIRES the owner's one-click authorize at
    app.circleci.com as `abyssbugg`. Until that click, definition create + first run remain
    UNVERIFIED and are not claimed.
+
+---
+## 2026-10-27 toolchain session (continued): hosted macOS CI GREEN + all four Apps confirmed + Verity registered
+
+All evidence below from live commands/chrome-session observations on 2026-10-27.
+
+### CircleCI runs #1–#7 — full honest iteration record (branch ci/macos-fix except #1/#7)
+
+| # | rev | config form | result + verbatim platform message |
+|---|-----|-------------|-------------------------------------|
+| 1 | main `f505096` | `macos: xcode: 16.4.0` + `resource_class: macos.m1.medium` | FAILED 0s: "Resource class macos for macos.m1.medium, image xcode:16.4.0 is not available for your project, or is not a valid resource class" |
+| 2 | `26c70a8` v1 | `machine: image: macos-xcode:16.4.0` (default class) | FAILED 0s: "Job was rejected because resource class large, image macos-xcode:16.4.0 is not a valid resource class" |
+| 3 | `b77487e` v2 | same + `resource_class: macos.m1.medium.gen1` | FAILED 0s: "Resource class machine for macos.m1.medium.gen1, image macos-xcode:16.4.0 is not available for your project… This message will often appear if the pricing plan for this project does not support machine use." |
+| 4 | `6d7d874` v4 | legacy executor + `resource_class: macos.x86.medium.gen2` | FAILED 0s: "Resource class macos for macos.x86.medium.gen2, image xcode:16.4.0 is not available for your project… does not support macos use." |
+| 5 | `412c0f0` v5 | legacy executor + `resource_class: m4pro.medium` | FIRST REAL SCHEDULE (job `d1209c50` started 06:05:42 UTC on a VM); build failed honestly: "error: 'project': package 'project' is using Swift tools version 6.3.0 but the installed version is 6.1.0" (hosted Xcode 16.4.0 ships Swift 6.1 < Package.swift's required 6.3.0) |
+| 6 | `1bab61b` v6 | `macos: xcode: 27.2.0` + `resource_class: m4pro.medium` | ✅ workflow `build-and-test` SUCCEEDED 06:06:36→06:07:46 UTC; every step success incl. both hard gates |
+| 7 | main `249e627` (merge of ci/macos-fix) | same config as v6 via merge | fired on merge push (result observed in the CI runs UI; see run table note in §4 of RELEASE-PLUMBING) |
+
+**Root cause of runs #1–#4 (the trap now in AGENTS.md gotcha ledger):** all four used RETIRED
+resource-class names. Docs facts (docs/guides/execute/using-macos/, last_updated 2026-10-15 +
+changelog "Free plan: Default macOS resource class changes to m4pro.medium"):
+- `macos.m1.medium(.gen1)`: M1/M2 classes END OF LIFE 2026-02-16 (changelog "Deprecation of Mac M1 and M2 resource classes").
+- Intel classes: removed ("Starting June 29, 2024 we will only offer Apple silicon-based macOS resources" — discuss thread 48718).
+- Current valid classes are BARE names (NO `macos.` prefix): `m4pro.medium` (6 vCPU/28GB, 200 credits/min) and `m4pro.large` (12 vCPU/56GB); `macos.m4pro.medium` is itself an invalid spelling.
+- The platform's "pricing plan does not support macos/machine use" hint is GENERIC BOILERPLATE, not the actual blocker (plan is Performance, evidenced below).
+
+**Run #6 green-run facts (from MCP get_job_logs, job `2fd2679c-64b6-41b6-8130-8916ed0b1a41`):**
+- Toolchain evidence step (num 103, exit 0):
+  "Apple Swift version 6.4.2 (swiftlang-6.4.2.1.9 clang-2100.4.1.1)  Target: arm64-apple-macosx26.0
+   Xcode 27.2  Build version 27B48   ProductVersion: macOS 26.6.2  BuildVersion: 25G83"
+- Test step (num 105, exit 0): "✔ Test run with 227 tests in 20 suites passed after 15.531 seconds."
+  → EXACT match with the local standing gate numbers (227 tests / 20 suites). The XCTest
+  "Executed 0 tests" line appears immediately before Swift Testing output — the known
+  XCTest-discovery trap, guarded by the config's nonzero-test-count grep gate.
+- swiftlint correctness-gate step: success (0 error-severity hits or it would exit nonzero).
+- SPM cache: "Stored Cache to spm-v1-… Total size uploaded: 189 MiB".
+- Toolchain parity note for the gotcha ledger: local locked = Xcode 27-beta / Swift 6.4; hosted = Xcode 27.2 / Swift 6.4.2. Same 6.4 minor → full gate green; exact Swift build differs → recorded divergence, not a waiver.
+
+### Plan/credits facts (app.circleci.com Plan page 2026-10-27)
+"Current plan: Performance · Monthly subscription 25,000 monthly credits + 30,000 monthly bonus credits · 72,320 credits remaining · Access to resource class sizes S-⁠XL · Run up to 80 jobs concurrently."
+API facts: `run trigger` NOT supported for GitHub-App projects — verbatim: "This API is not yet supported for this GitHub App or GitLab project."; first run triggered via the UI "Run pipeline" button (project dialog, pipeline "ci", branch main/main); all later runs fired automatically by the `all-pushes` trigger `31151bfc-5576-443f-a40d-6a7fa423f34f` on pipeline definition `6d189e51-4464-44de-a1bd-1a649c3085e4` (config+checkout provider BOTH github_app, repo external id 1433959784).
+
+### GitHub Apps confirmed installed + connected (github.com/settings/installations, session identity @abyssbugg, avatar id 206688117)
+- "CircleCI App" — installation 83572274 (its repo access is ALSO proven by construction: the github_app pipeline definition + checkout both bound via its API access; run #7 exists).
+- "Codacy Production" — installation 106886062; Codacy dashboard live at app.codacy.com/gh/abyssbugg/appupdater/dashboard (completed analysis shown in the user's Chrome).
+- "coderabbitai" — installation 105861716; CodeRabbit workspace "abyssbugg" (Advanced) Connected-repositories page lists `appupdater`; repo settings route (repository/1433959784) renders.
+- "Verity auth" — installation 175623405 (app by Codacy, github.com/apps/verity-auth).
+(Sudo-gated repo-scope pages were NOT poked; scope is evidenced product-side by the products listing the repo.)
+
+### Verity — cloud connection COMPLETE (was the FORBIDDEN gap)
+- First device flow (code 8434-F671) expired unapproved; second (D5B0-4BE9) captured-but-terminated; third attempt (code E8FA-32EC) completed via the OWNER'S CHROME SESSION at github.com/login/device signed in as @abyssbugg → consent page "Authorize Verity auth (by Codacy)" → "Congratulations, you're all set! Your device is now connected."
+- `verity auth register --project appupdater` output: "✓ Authorized on GitHub (63s) · Project registered: 5fd1fbd6-e317-4760-975d-3418a962648d · Authenticated as: jlpbyakermansart@gmail.com" + {"project_id": "5fd1fbd6-…", "service_url": "https://ofcamwrjwrkazqvdchko.supabase.co/functions/v1"}.
+- `verity standard push` → HTTP 201 "Standard uploaded (version 1)" id `04f352a6-9833-4933-b7d6-a715351b4de9` (created_by verity-cli).
+- `verity status` → "Project: appupdater · Standard: v1 (4 quality, 7 security, 5 custom) · Moments: stop · Runs: 0 recorded".
+- `verity memory seed` → "Seeded 14 knowledge node(s) from the Standard into .verity/memory/".
+- `verity config git-moments commit,push` → "Git-moment review enabled for: commit, push" (was off; stop-hook analyze remains on). `verity config formal` → off (Lean not installed — honest, not claimed).
+- HONEST GAP RECORDED: the uploaded Standard's knowledge_spec metadata is EMPTY ("languages":[],"frameworks":[],"build_system":"","test_framework":"") — the 2026-10-26 synthesize pass derived dimensions only. Refinement = edit `.verity/standard.yaml` + push v2; not a gate blocker.
+
+### CodeRabbit local review note
+CodeRabbit CLI path unchanged from 2026-10-26 (`coderabbit review --committed --base-commit <ref> --agent`). With the GitHub App now connected, PR-triggered reviews are live — the merge commit `249e627` on main is the first PR-less push they cover via CI runs; open a PR for any future review pass to get structured comments.
