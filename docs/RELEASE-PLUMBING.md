@@ -58,6 +58,14 @@ signature verifying against the embedded public key.
 
 ## 2. Release checklist (per release, incl. self-updates)
 
+**Automated:** `Scripts/make-release.sh <version> <build> <notes-file>` runs this
+checklist end-to-end with honesty guards (build number MUST advance past the
+feed's `sparkle:version`; no duplicate tag; clean tree; nonzero test count;
+lint error column empty; asset size verified after upload; appcast spliced +
+committed + pushed). `--check` runs the guards + gate without touching
+anything. shellcheck-clean; guards validated by dry-run. The manual steps
+below document WHAT it does.
+
 1. Full gate on main is green THIS session (AGENTS.md → Verification gate —
    build / full test suite / bundle / sign / plutil / live launch / CLI
    evidence, all with current-session output).

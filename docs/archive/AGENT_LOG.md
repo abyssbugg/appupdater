@@ -5,7 +5,17 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
-## 2026-10-27 — Release v0.1.0 PUBLISHED — feed live; signature chain re-proven on the shipped artifact
+## 2026-10-27 — v0.1.0 release closed out + notarization abandoned (owner directive) + release pipeline scripted
+
+**Confirmed (live evidence):**
+1. **Release closed out:** `appcast.xml` committed (`3244b29`) — item values re-derived from the SHIPPED artifact (signature re-verified exit 0; release asset downloaded and byte-compared to the signed build; Info.plist read from the downloaded zip). Feed verified LIVE (raw URL → HTTP 200). Both pushes green on CircleCI. Docs: RELEASE-PLUMBING §2b receipts + §2 warning that CFBundleVersion must advance (Sparkle compares build numbers — short-version-only bumps offer nothing).
+2. **Owner directive recorded (LOCKED decision 9 amended):** notarization explicitly abandoned for now; public distribution via GitHub Releases accepted with the documented ad-hoc-signing Gatekeeper caveat. Apple Developer enrollment now optional, not planned.
+3. **Three caveats structurally fixed:** (a) feed note — the dev build in `build/` already carries the live feed URL (byte-identical to the released zip); nothing to reinstall; (b) Gatekeeper note — inherent to ad-hoc signing without notarization (abandoned by owner decision); the release notes carry the one-time right-click-Open mitigation, nothing further possible honestly; (c) version-bump note — `Scripts/make-release.sh` written (shellcheck CLEAN) with hard guards: build must advance past the feed's `sparkle:version`, no duplicate tag, clean tree, nonzero test count, lint error column empty, asset size verified post-upload, appcast spliced+pushed. Guards validated by dry-run (`--check`): build-advance refusal + clean-tree refusal + duplicate-tag refusal all proven firing; full pipeline path is the same §1b/§2 steps proven individually.
+4. **make-app.sh parameterized:** APPUPDATER_VERSION / APPUPDATER_BUILD env knobs (defaults 0.1.0 / 1) via PlistBuddy Set — one source record, per §2 item 3.
+
+---
+
+## 2026-10-27 — v0.1.0 release close-out, part 1: feed committed + receipts recorded (close-out summary above)
 
 **Context:** the owner's parallel session (OpenCode) executed the release pipeline through `gh release create v0.1.0` and stopped before the feed + record. This session independently re-proved everything rather than trusting the transcript, then closed the release out.
 

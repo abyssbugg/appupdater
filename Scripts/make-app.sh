@@ -5,15 +5,22 @@
 # Phase 5 (self-update): embeds Sparkle.framework and configures the Sparkle
 # Info.plist keys. Env knobs (all optional):
 #   APPUPDATER_FEED_URL       — SUFeedURL for self-update checks.
-#                               Default: https://releases.appupdater.invalid/appupdater-appcast.xml
-#                               (.invalid never resolves → checks fail honestly, never fake success)
-#   APPUPDATER_PUBLIC_ED_KEY  — SUPublicEDKey (Sparkle EdDSA public key). When unset the key is
-#                               OMITTED and Sparkle refuses to install updates (honest security floor).
+#                               Default: https://raw.githubusercontent.com/abyssbugg/appupdater/main/appcast.xml
+#                               (the live feed — set .invalid for honest-unreachable local tests)
+#   APPUPDATER_PUBLIC_ED_KEY  — SUPublicEDKey (Sparkle EdDSA public key). Default: the
+#                               committed release key (public half; private half is keychain-only).
+#   APPUPDATER_VERSION        — CFBundleShortVersionString.  Default: 0.1.0
+#   APPUPDATER_BUILD          — CFBundleVersion.             Default: 1
+#                               ⚠ Sparkle compares CFBundleVersion against the appcast's
+#                               sparkle:version — a release MUST advance BOTH (guarded in
+#                               Scripts/make-release.sh).
 # Automatic checks are hard-off (SUEnableAutomaticChecks=false): self-update runs only
 # through the explicit "Check for Self-Update…" menu action.
 set -euo pipefail
 
 CONFIG=${1:-release}
+VERSION="${APPUPDATER_VERSION:-0.1.0}"
+BUILD="${APPUPDATER_BUILD:-1}"
 swift build -c "$CONFIG"
 
 APP=build/AppUpdater.app
@@ -56,6 +63,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 PB=/usr/libexec/PlistBuddy
+$PB -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+$PB -c "Set :CFBundleVersion $BUILD" "$APP/Contents/Info.plist"
 $PB -c "Add :SUEnableAutomaticChecks bool false" "$APP/Contents/Info.plist"
 FEED_URL="${APPUPDATER_FEED_URL:-https://releases.appupdater.invalid/appupdater-appcast.xml}"
 $PB -c "Add :SUFeedURL string $FEED_URL" "$APP/Contents/Info.plist"
