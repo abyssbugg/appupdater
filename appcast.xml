@@ -1,0 +1,18 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
+    <channel>
+        <title>AppUpdater</title>
+        <link>https://github.com/abyssbugg/appupdater</link>
+        <description>AppUpdater release feed — items install only when their EdDSA signature verifies against the public key embedded in the app.</description>
+        <language>en</language>
+        <item>
+            <title>Version 0.1.0</title>
+            <pubDate>Tue, 27 Oct 2026 07:37:23 +0000</pubDate>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/abyssbugg/appupdater/releases/download/v0.1.0/AppUpdater-0.1.0.zip" length="1615042" type="application/octet-stream" sparkle:edSignature="l66KKmFt0GEBOFlIibg/xBTXmFIP9y2p3dTxcWUe+8DDdSni8AYJVlXIVirc4HfoE6vCC+qjxg5FzH7oonf2Cw=="/>
+        </item>
+    </channel>
+</rss>
