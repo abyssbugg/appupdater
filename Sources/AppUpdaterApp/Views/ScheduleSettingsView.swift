@@ -1,7 +1,7 @@
 import SwiftUI
 import AppUpdaterCore
 
-/// The schedule pane (window sheet): the SchedulePolicy editor + the honest
+/// The schedule pane (window sheet): the SchedulePolicy editor + honest
 /// current-state lines. Apply clamps → persists → restarts the engine
 /// stream (policy is fixed per stream — the engine's own contract).
 struct ScheduleSettingsView: View {
@@ -25,54 +25,56 @@ struct ScheduleSettingsView: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Automatic Check Schedule").font(.headline)
+        VStack(spacing: 0) {
+            header
+            Form {
+                Section("Automatic Checking") {
+                    Picker("Interval", selection: $draftMinutes) {
+                        ForEach(Self.minuteChoices, id: \.minutes) { choice in
+                            Text(choice.label).tag(choice.minutes)
+                        }
+                    }
+                    Toggle("Skip while on battery power", isOn: $draftSkipOnBattery)
+                    Toggle("Catch up a missed check on wake", isOn: $draftCatchUp)
+                }
 
-            Picker("Interval", selection: $draftMinutes) {
-                ForEach(Self.minuteChoices, id: \.minutes) { choice in
-                    Text(choice.label).tag(choice.minutes)
+                Section("Notifications") {
+                    Toggle("Notify about newly discovered updates", isOn: Binding(
+                        get: { appState.notificationsEnabled },
+                        set: { appState.setNotificationsEnabled($0) }))
+                    if let state = appState.notificationsState {
+                        Label(state, systemImage: "bell.slash")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Section("Current state") {
+                    ForEach(appState.menuData.scheduleSection, id: \.self) { line in
+                        Label {
+                            Text(line).font(.callout)
+                        } icon: {
+                            Image(systemName: "clock").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    if let failure = appState.scheduleError {
+                        Label(failure, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Section {
+                    Text("Automatic checks surface updates only — nothing is ever applied by itself (the owner-run CLI boundary). Scheduled checks notify only about newly pending apps; the first check after launch sets a quiet baseline.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            Toggle("Skip while on battery power", isOn: $draftSkipOnBattery)
-            Toggle("Catch up a missed check on wake", isOn: $draftCatchUp)
+            .formStyle(.grouped)
 
             Divider()
-            ForEach(appState.menuData.scheduleSection, id: \.self) { line in
-                Text(line)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            // Notifications (v1 policy, decided 2026-10-26): the toggle is
-            // the master switch for the LOCAL summary; the honest status
-            // line (nil = normal) shows verbatim failure facts; the caption
-            // states the scheduled-fire-only diff policy.
-            Toggle(
-                "Notify about newly discovered updates",
-                isOn: Binding(
-                    get: { appState.notificationsEnabled },
-                    set: { appState.setNotificationsEnabled($0) }))
-            if let state = appState.notificationsState {
-                Text(state)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .textSelection(.enabled)
-            }
-            Text("Scheduled checks only — the first check after launch sets the baseline and stays quiet; only newly pending apps surface.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            if let failure = appState.scheduleError {
-                Text(failure)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-            }
-
-            Text("Automatic checks surface updates only — nothing is ever applied by itself (the owner-run CLI boundary).")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { onClose() }
@@ -87,11 +89,28 @@ struct ScheduleSettingsView: View {
                     onClose()
                 }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
             }
+            .padding(12)
         }
-        .padding(18)
-        .frame(width: 400)
+        .frame(width: 440)
         .onAppear(perform: loadDraft)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "clock.badge.checkmark")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Schedule & Notifications").font(.headline)
+                Text("How often AppUpdater looks for updates on its own")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(14)
     }
 
     /// Snaps the loaded interval onto the picker honestly: an off-policy
