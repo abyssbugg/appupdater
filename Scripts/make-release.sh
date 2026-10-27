@@ -38,8 +38,8 @@ cd "$REPO_ROOT"
 LAST_BUILD="$(sed -n 's/.*<sparkle:version>\([0-9][0-9]*\)<\/sparkle:version>.*/\1/p' appcast.xml | head -1)"
 [ -n "$LAST_BUILD" ] || die "could not read sparkle:version from appcast.xml"
 [ "$BUILD" -gt "$LAST_BUILD" ] || die "build $BUILD must be > current feed sparkle:version $LAST_BUILD (Sparkle compares CFBundleVersion — short-version-only bumps offer no update)"
-if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
-    die "tag v$VERSION already exists"
+if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q "refs/tags/v$VERSION"; then
+    die "tag v$VERSION already exists on origin (local clones may lag remote tags — checked remotely)"
 fi
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     die "uncommitted tracked changes present — commit or stash first (releases are cut from a clean tree)"

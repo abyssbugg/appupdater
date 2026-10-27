@@ -13,7 +13,6 @@ line_length:
   ignores_comments: true
   ignores_urls: true
 identifier_name:
-  severity: warning
   min_length: 2
   excluded:
     - id
