@@ -116,6 +116,23 @@ struct CaskRecord: Decodable, Sendable {
         }
         return names
     }
+
+    /// `pkg` artifact values of this cask — the `.pkg` installers it claims to
+    /// hand to installer(8). Mirror of `artifactAppNames`' walk (same recursive
+    /// flattening of nested arrays/bare strings). Deliberately NOT read from
+    /// `uninstall`/`zap`, whose path strings are cleanup targets, not installs.
+    /// These names feed ONLY the strictly-gated pkg-only evidence class
+    /// (CaskMatching.pkgArtifactsMatchInstalledApp) behind the staged
+    /// owner-command flow — they can never satisfy the app-artifact validator.
+    var pkgArtifactNames: [String] {
+        var names: [String] = []
+        guard case .array(let directives) = artifacts else { return names }
+        for directive in directives {
+            guard case .object(let keys) = directive, let pkg = keys["pkg"] else { continue }
+            CaskJSONValue.collectStrings(from: pkg, into: &names)
+        }
+        return names
+    }
 }
 
 // MARK: - Matching policy (honest boundary)
@@ -155,5 +172,94 @@ enum CaskMatching {
         var base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if base.lowercased().hasSuffix(".app") { base.removeLast(4) }
         return base.lowercased()
+    }
+
+    // MARK: - pkg-only evidence class (staged owner-command flow)
+
+    /// Platform/build tokens that say nothing about WHICH app a pkg belongs to;
+    /// never allowed to survive into a derived match name.
+    private static let platformAndBuildTokens: Set<String> = [
+        "macos", "mac", "osx", "apple", "silicon", "intel", "arm64", "aarch64",
+        "x86_64", "x64", "universal", "installer", "install", "setup", "release",
+        "stable", "latest", "final",
+    ]
+
+    /// Candidate app name derived from a pkg FILENAME, for the strictly-gated
+    /// pkg-only evidence class. Deliberately conservative — a wrong derivation
+    /// would stage the WRONG pkg for a sudo install, so this refuses to answer
+    /// unless the leftovers unambiguously name one app:
+    ///   - strip ".pkg" (input lowercased first), split on "-", "_" and spaces;
+    ///   - drop version-shaped tokens (^v?[0-9]+([._-]?[0-9]+)*$, e.g. 1.104.4, v2, 4);
+    ///   - drop pure-hex tokens of length ≥ 8 (build hashes);
+    ///   - drop the platform/build token set (macos, arm64, universal, installer, …);
+    ///   - nil when nothing survives OR any survivor contains a digit.
+    /// "Tailscale-1.104.4-macos.pkg" → "tailscale"; "Sublime-Text-4.pkg" → "sublime-text".
+    static func pkgDerivedMatchName(fromPkgFilename filename: String) -> String? {
+        let base = filename.lowercased()
+        let stem = base.hasSuffix(".pkg") ? String(base.dropLast(4)) : base
+        let survivors = stem
+            .split(whereSeparator: { $0 == "-" || $0 == "_" || $0 == " " })
+            .filter { token in
+                let token = String(token)
+                return !looksLikeVersionToken(token)
+                    && !looksLikeHexToken(token)
+                    && !platformAndBuildTokens.contains(token)
+            }
+        guard !survivors.isEmpty else { return nil }
+        // Conservative floor: a surviving token with a digit voids the derivation.
+        let digitSurvives = survivors.contains { token in
+            token.contains { ("0"..."9").contains($0) }
+        }
+        guard !digitSurvives else { return nil }
+        return survivors.joined(separator: "-")
+    }
+
+    /// Version-shaped token: ^v?[0-9]+([._-]?[0-9]+)*$ — hand-rolled as an exact
+    /// split-based equivalent of that regex (each separator-separated group must
+    /// be non-empty and all-digits; adjacent separators produce an empty group
+    /// and fail, matching the regex's single-separator rule). A runtime-regex
+    /// failure mode must never silently change the drop policy.
+    private static func looksLikeVersionToken(_ token: String) -> Bool {
+        let body = token.hasPrefix("v") ? String(token.dropFirst()) : token
+        if body.isEmpty { return false }
+        let groups = body.split(
+            omittingEmptySubsequences: false,
+            whereSeparator: { $0 == "." || $0 == "_" || $0 == "-" })
+        return groups.allSatisfy { group in
+            !group.isEmpty && group.allSatisfy { ("0"..."9").contains($0) }
+        }
+    }
+
+    /// Pure-hex token of length ≥ 8 — reads as a build/hash artifact, not a name.
+    private static func looksLikeHexToken(_ token: String) -> Bool {
+        token.count >= 8 && token.allSatisfy(\.isHexDigit)
+    }
+
+    /// The strictly-gated pkg-only match, reached ONLY when zero app-artifact
+    /// matches exist (CaskIndexStore.resolvedMatch contract). A pkg-only cask
+    /// validates the installed app iff ALL floors hold:
+    ///   1. a derived pkg name equals the installed app's name or bundle-path
+    ///      basename (same normalized comparison as the app-artifact validator);
+    ///   2. the record carries a sha256 hex — a pkg claim without a checksum is
+    ///      worthless (the staged flow verifies it; nothing may claim without it);
+    ///   3. the record's `url` path extension (lowercased) is "pkg" — a pkg
+    ///      artifact listed under a dmg/zip url is misleading evidence.
+    static func pkgArtifactsMatchInstalledApp(record: CaskRecord, for app: InstalledApp) -> Bool {
+        guard let hex = record.sha256?.hex?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !hex.isEmpty else { return false }
+        // NSString pathExtension (not URL(string:)) so a literal-space url still
+        // reads its extension — the same space-bearing urls the downstream
+        // planner accepts through the source's percent-encoding fallback.
+        guard let urlString = record.url, !urlString.isEmpty,
+              (urlString as NSString).pathExtension.lowercased() == "pkg" else { return false }
+        let pathBasename = (app.path as NSString).lastPathComponent
+        let installed = Set([
+            normalizeBundleName(app.name),
+            normalizeBundleName(pathBasename),
+        ])
+        return record.pkgArtifactNames.contains { artifact in
+            guard let derived = pkgDerivedMatchName(fromPkgFilename: artifact) else { return false }
+            return installed.contains(derived)
+        }
     }
 }

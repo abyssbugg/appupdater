@@ -55,9 +55,10 @@
 // (the session's in-memory index is complete); `lastError` tracks only the
 // status/network/decode pipeline per the brief.
 //
-// MATCHING (honest boundary — a record is returned only if ITS OWN `app` artifacts
-// validate the installed app, via the shared `CaskMatching` validators — a record
-// failing that validation is never returned, token path or scan path):
+// MATCHING (honest boundary — a record is returned only if ITS OWN `app`
+// artifacts validate the installed app via the shared `CaskMatching` validators,
+// or — strictly weaker and gated — through the pkg-only evidence class in (c);
+// a record failing both validations is never returned, token path or scan path):
 //   a. token hit: `CaskMatching.candidateToken(from: app.name)` looked up in the
 //      loaded index and accepted only if `CaskMatching.caskMatchesInstalledApp`
 //      agrees (artifact evidence).
@@ -68,6 +69,15 @@
 //      `displayName` equals app.name case-insensitively; if several still match,
 //      the FIRST record in index order is kept and the ambiguity is recorded in
 //      the log (os.Logger, category "cask-index").
+//   c. pkg-only fallback (2026-10-28, staged owner-command flow): reached ONLY
+//      when zero app-artifact matches exist anywhere (a) and (b) both empty.
+//      Pkg-only casks (tailscale-app shape: artifacts carry `pkg`, NO `app`)
+//      can never satisfy (a)/(b), so they previously never drove the staged
+//      sudo-installer flow at all. Now ONE pkg-claiming record may match iff
+//      `CaskMatching.pkgArtifactsMatchInstalledApp` accepts (derived pkg-name
+//      equality + sha256-hex floor + `url` really is the .pkg). Weaker evidence
+//      demands UNIQUENESS: 2+ distinct claiming records return nil, and the
+//      ambiguity is recorded in the log like (b)'s note.
 //
 // VISIBILITY NOTE (compile-forced, flagged to the coordinator): `CaskRecord` is
 // internal to this module (defined in CaskResponse.swift, a shared file outside
@@ -173,14 +183,15 @@ public actor CaskIndexStore {
     }
 
     /// The matching record for `app`, or nil. Never returns a record that fails
-    /// artifact validation (see header "MATCHING").
+    /// validation (app-artifact evidence, or the strictly-gated pkg-only class —
+    /// see header "MATCHING").
     func bestMatch(for app: InstalledApp) async -> CaskRecord? {
         await resolvedMatch(for: app)?.record
     }
 
     /// bestMatch plus HOW it matched — the basis fragment feeds CaskIndexSource's
     /// honest sourceDetail text ("matched by token 'x'" / "matched by
-    /// artifact-name 'Y.app'").
+    /// artifact-name 'Y.app'" / "matched by pkg-artifact 'F.pkg' (derived 'n')").
     func resolvedMatch(for app: InstalledApp) async -> CaskIndexMatch? {
         // (a) derived token, accepted only with artifact evidence.
         if let token = CaskMatching.candidateToken(from: app.name),
@@ -195,7 +206,10 @@ public actor CaskIndexStore {
         guard let chosen = matches.first(where: {
             $0.displayName?.caseInsensitiveCompare(app.name) == .orderedSame
         }) ?? matches.first else {
-            return nil
+            // (c) zero app-artifact matches anywhere — the strictly-gated
+            // pkg-only evidence class may still fire (never the other way
+            // around: (a)/(b) ALWAYS win when they fire).
+            return pkgDerivedMatch(for: app)
         }
         if matches.count > 1 {
             // The "note it" directive: ambiguity is recorded whenever it is broken
@@ -210,6 +224,38 @@ public actor CaskIndexStore {
             artifact: artifact ?? "artifact-name match (artifact list inconsistent with validator)")
     }
 
+    /// (c) The weaker evidence class: pkg-only casks whose pkg filename derives
+    /// the installed app's name. Gated by `CaskMatching.pkgArtifactsMatchInstalledApp`
+    /// (derived-name equality + sha256 floor + url-is-the-pkg) AND by uniqueness —
+    /// 2+ distinct claiming records return nil, because a wrong derivation here
+    /// would stage the WRONG pkg for a sudo install.
+    private func pkgDerivedMatch(for app: InstalledApp) -> CaskIndexMatch? {
+        let pkgMatches = records.filter { CaskMatching.pkgArtifactsMatchInstalledApp(record: $0, for: app) }
+        // "Distinct" = distinct cask tokens: the index can hold duplicate entries
+        // under one token (installDecodedRecords last-wins), and one cask claiming
+        // twice is still ONE cask. Tokenless records each stand alone.
+        var seenTokens = Set<String>()
+        let distinct = pkgMatches.filter { record in
+            guard let token = record.token else { return true }
+            return seenTokens.insert(token).inserted
+        }
+        guard distinct.count == 1, let chosen = distinct.first else {
+            if distinct.count > 1 {
+                // Same "note it" directive as the artifact ambiguity above.
+                let note = "cask pkg match for '\(app.name)' ambiguous (\(distinct.count) distinct pkg-only records) — weaker evidence requires uniqueness, refusing"
+                Self.log.notice("\(note, privacy: .public)")
+            }
+            return nil
+        }
+        guard let evidence = Self.matchingPkgArtifact(of: chosen, for: app) else {
+            // pkgArtifactsMatchInstalledApp accepted but the name-only mirror
+            // finds nothing — the validator's policy moved; never fabricate a
+            // basis (same honesty contract as matchingArtifact's fallback).
+            return nil
+        }
+        return .pkgArtifact(record: chosen, artifact: evidence.artifact, derived: evidence.derived)
+    }
+
     /// Derive-only mirror of `CaskMatching.caskMatchesInstalledApp` internals,
     /// used solely to NAME the matched artifact for the sourceDetail string. The
     /// accept/reject decision itself always delegates to the canonical validator;
@@ -222,6 +268,29 @@ public actor CaskIndexStore {
             CaskMatching.normalizeBundleName(pathBasename),
         ])
         return record.artifactAppNames.first { installed.contains(CaskMatching.normalizeBundleName($0)) }
+    }
+
+    /// Derive-only mirror of `CaskMatching.pkgArtifactsMatchInstalledApp`'
+    /// name comparison, used solely to NAME the matched pkg artifact + its
+    /// derived name for the sourceDetail string. The accept/reject decision
+    /// itself always delegates to the canonical validator (sha256/url floors
+    /// included); these two could only disagree if CaskMatching's policy
+    /// changed, in which case pkgDerivedMatch honestly returns nil.
+    private nonisolated static func matchingPkgArtifact(
+        of record: CaskRecord, for app: InstalledApp
+    ) -> (artifact: String, derived: String)? {
+        let pathBasename = (app.path as NSString).lastPathComponent
+        let installed = Set([
+            CaskMatching.normalizeBundleName(app.name),
+            CaskMatching.normalizeBundleName(pathBasename),
+        ])
+        for artifact in record.pkgArtifactNames {
+            if let derived = CaskMatching.pkgDerivedMatchName(fromPkgFilename: artifact),
+               installed.contains(derived) {
+                return (artifact, derived)
+            }
+        }
+        return nil
     }
 
     // MARK: - Cycle internals
@@ -406,20 +475,29 @@ enum CaskIndexMatch: Sendable {
     case token(token: String, record: CaskRecord)
     /// Matched through the whole-index artifact scan (the alias-killer path).
     case artifactName(record: CaskRecord, artifact: String)
+    /// Matched through the strictly-gated pkg-only evidence class (weaker:
+    /// filename derivation, uniqueness required) behind the staged
+    /// owner-command flow. Reached only when zero app-artifact matches exist.
+    case pkgArtifact(record: CaskRecord, artifact: String, derived: String)
 
     var record: CaskRecord {
         switch self {
         case .token(_, let record): return record
         case .artifactName(let record, _): return record
+        case .pkgArtifact(let record, _, _): return record
         }
     }
 
     /// Fragment inside CaskIndexSource's sourceDetail:
-    /// "token 'google-chrome'" / "artifact-name 'Google Chrome.app'".
+    /// "token 'google-chrome'" / "artifact-name 'Google Chrome.app'" /
+    /// "pkg-artifact 'Tailscale-1.104.4-macos.pkg' (derived 'tailscale')" —
+    /// the pkg fragment names the weaker evidence class honestly.
     var basisFragment: String {
         switch self {
         case .token(let token, _): return "token '\(token)'"
         case .artifactName(_, let artifact): return "artifact-name '\(artifact)'"
+        case .pkgArtifact(_, let artifact, let derived):
+            return "pkg-artifact '\(artifact)' (derived '\(derived)')"
         }
     }
 }

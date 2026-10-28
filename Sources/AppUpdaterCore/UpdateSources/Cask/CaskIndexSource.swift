@@ -5,10 +5,12 @@
 // (never rethrowing through the frozen `UpdateSource.throws`) — plus one honesty
 // upgrade over the single-cask source: the sourceDetail names HOW the match was
 // found, because the whole-index store knows whether the verdict came from the
-// derived-token path or the artifact-name scan (the alias-killer path that retires
-// CaskAliases maintenance). Exact frozen text:
-//   "Homebrew cask whole-index; matched by <token 'x' | artifact-name 'Y.app'>;
-//    self-attested (sha256 lives in the same unsigned JSON)."
+// derived-token path, the artifact-name scan (the alias-killer path that retires
+// CaskAliases maintenance), or the strictly-gated pkg-only class behind the
+// staged owner-command flow. Exact frozen text:
+//   "Homebrew cask whole-index; matched by <token 'x' | artifact-name 'Y.app' |
+//    pkg-artifact 'F.pkg' (derived 'n')>; self-attested (sha256 lives in the
+//    same unsigned JSON)."
 //
 // ORCHESTRATION CONTRACT (for AppState wiring): this source does NOT call
 // `store.ensureLoaded()` itself — a ensure cycle costs one conditional network
