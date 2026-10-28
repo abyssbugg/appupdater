@@ -1,0 +1,122 @@
+GAP-CASK-INDEX evidence — lane gap/cask-index
+=============================================
+
+worktree:  /Users/datamatics/dev/appupdater/.worktrees/cask-index
+branch:    gap/cask-index (branched from main)
+date:      2026-10-27
+scope:     GAP-ANALYSIS item #1 — whole-index Homebrew cask mode (ETag-cached
+           cask.json, artifact-scan matching) retiring CaskAliases maintenance;
+           single-token pipeline extracted as CaskDocumentClient.
+
+GATE (verbatim — commands run with `cd` because shell cwd is not sticky)
+-----------------------------------------------------------------------
+
+$ swift build 2>&1 | tail -3
+[Using on-disk description]
+[1 / 4] AppUpdaterApp-product
+Build complete! (0.50 sec)
+
+$ swift test 2>&1 | tail -6
+◇ Test swapPreservesOldRootMtime() started.
+✔ Test swapPreservesOldRootMtime() passed after 0.090 seconds.
+◇ Test swapReleasesQuarantineWhenPresent() started.
+✔ Test swapReleasesQuarantineWhenPresent() passed after 0.034 seconds.
+✔ Suite DeployTests passed after 18.533 seconds.
+✔ Test run with 256 tests in 22 suites passed after 18.533 seconds.
+
+  (baseline 227 tests / 20 suites + 29 new tests in CaskIndexTests.swift;
+   two new suites: CaskIndexStoreTests, CaskDocumentClientTests)
+
+$ swiftlint lint --quiet 2>&1 | grep -c ": error: "
+0
+
+STABILITY (house flake-proof protocol, this session)
+----------------------------------------------------
+
+swift test run twice more back-to-back + TWO CONCURRENT full runs — all green:
+✔ Test run with 256 tests in 22 suites passed after 16.075 seconds.
+✔ Test run with 256 tests in 22 suites passed after 13.276 seconds.
+✔ Test run with 256 tests in 22 suites passed after 14.825 seconds.  (concurrent)
+✔ Test run with 256 tests in 22 suites passed after 10.411 seconds.  (concurrent)
+
+HONEST NOTES
+------------
+
+1. Compile-forced API-visibility deviation (FLAGGED FOR COORDINATOR). The brief
+   sketched `public func bestMatch(for:) -> CaskRecord?` and
+   `public func record(withToken:)`. Swift rejects a public member whose
+   signature exposes the module-internal `CaskRecord` (it lives in
+   CaskResponse.swift, a SHARED file outside this lane's ownership — therefore
+   not made public here). These members are compiled INTERNAL:
+     internal members: CaskIndexStore.bestMatch(for:),
+     CaskIndexStore.record(withToken:), CaskIndexStore.resolvedMatch(for:)
+     and the internal enum CaskIndexMatch (token / artifactName + basisFragment).
+   Tests reach them via @testable import. ensureLoaded, dropCache, isLoaded,
+   cachedRecordCount, lastError ARE public as briefed. If another module ever
+   needs direct record access, opening up CaskRecord is a shared-file decision.
+   (Compiler probe in this session confirmed the exact error: "method cannot be
+   declared public because its result uses an internal type".)
+
+2. Actors cannot declare `convenience` initializers — the production
+   convenience `CaskIndexStore.init(directory:)` is a plain delegating
+   designated init (role identical to CaskSource's double-init pattern).
+
+3. ensureLoaded runs ONE full cycle per sequential call (disk decode skipped
+   when memory already holds records, then ONE conditional GET — 304-expected in
+   steady state). Deliberately NOT session-memoized: the literal brief. AppState
+   wiring should call ensureLoaded() once per scan pass, then bestMatch per app
+   (CaskIndexSource.fetchUpdateInfo deliberately does NOT ensure itself).
+
+4. lastError contract (verbatim, tested): "HTTP <code>" for non-2xx statuses
+   (minus the 304-handled case), e.g. "HTTP 500" / "HTTP 503";
+   "HTTP 304 without a usable cached cask.json" for the protocol-absurd 304;
+   String(describing:) for thrown network/decode errors (asserted via
+   NSURLErrorDomain); "non-HTTP response from ..." for a non-HTTP response.
+   lastError is cleared at the start of each cycle and by dropCache.
+
+5. Decode-BEFORE-persist ordering (self-heal, slight deviation from the
+   brief's "persist bytes+etag+decode" list): a 200 body is decoded FIRST; an
+   undecodable body never clobbers a good cache and never records an ETag for
+   bytes the store cannot decode (which would otherwise pin dead bytes on a 304
+   loop forever). Poisoned-disk test pins the behavior: no If-None-Match after a
+   disk decode failure, unconditional GET recovers.
+
+6. Stale-serve decision: when a cycle's NETWORK leg fails but usable records
+   were loaded (from disk this cycle or from memory), the records STAY
+   available; ensureLoaded returns false and lastError carries the revalidation
+   failure. ensureLoaded's Bool = "this cycle revalidated/refreshed cleanly",
+   not "records are usable" — pin by isLoaded/cachedRecordCount/lastError.
+
+7. Matching: token path (derived token + artifact validation) then the
+   validation-identical whole-index artifact scan (the alias-killer). Ties prefer
+   displayName == app.name case-insensitively (tested: exact-name beats EARLIER
+   array order); no tiebreak → first in index order, ambiguity recorded via
+   os.Logger notice (category cask-index) — log output itself is NOT asserted.
+
+8. Persist-failure honesty: cask.json/etag persistence failures are logged once
+   (error level) but never fail the cycle — the in-memory index is what the
+   session matches against; lastError tracks only the status/network/decode
+   pipeline per the brief. etag deletion mid-session costs one full GET next
+   cycle (honest degradation).
+
+9. Lint: 0 error-severity hits (the gate). Style-only warnings introduced by
+   this lane: file_length on CaskIndexStore.swift (425 lines, ~120 header doc
+   per house doc-comment-heavy style) and CaskIndexTests.swift (982 lines),
+   static_over_final_class ×4 on the URLProtocol stub overrides (byte-matching
+   the house pattern — CaskSourceTests.swift / MASSourceTests.swift carry the
+   identical warnings), type_body_length ×1 (CaskIndexStoreTests spans 320 lines
+   excl. comments — left split-unsplit to keep cross-suite stub state strictly
+   partitioned: two suites, two stub classes, fully parallel-safe).
+   Baseline main carries 77 style warnings; after merge: 86 total, still 0 errors.
+
+10. Requirements evidence read-only (nothing from docs/reverse committed):
+    UPDATEST-FINDINGS §3.2 (brew_api_cache.json 19 MB + brew_api_etag.txt,
+    "Brew API revalidated (304)"), §3.4 untouched, GAP-ANALYSIS item #1.
+
+FILES (sole ownership — git status shows nothing else changed)
+-------------------------------------------------------------
+Sources/AppUpdaterCore/UpdateSources/Cask/CaskIndexStore.swift      (new)
+Sources/AppUpdaterCore/UpdateSources/Cask/CaskIndexSource.swift     (new)
+Sources/AppUpdaterCore/UpdateSources/Cask/CaskDocumentClient.swift  (new)
+Tests/AppUpdaterCoreTests/CaskIndexTests.swift                      (new)
+docs/evidence/gap-cask-index-2026-10-27.txt                         (this file)
