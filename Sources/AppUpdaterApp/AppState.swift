@@ -398,6 +398,10 @@ final class AppState: ObservableObject {
             let evaluated = await rules.evaluate(apps: apps, checks: checks)
             await list.setRows(evaluated)
             await recordScheduledFireOutcome(appsChecked: targets.count, evaluatedRows: evaluated)
+            // Decision-14: after checks + rules, the opt-in auto-apply pass
+            // runs (master OFF by default → this reads one settings file and
+            // returns; opted-in apps are gated, applied, and receipted).
+            await runAutoApplyPass(evaluated: evaluated)
             return targets.count
         }
         lastApps = apps
@@ -736,8 +740,110 @@ final class AppState: ObservableObject {
     /// NOTIFICATION BOUNDARY (LOCKED, scheduled-fires-only): this path
     /// NEVER posts the distributed fire event, never advances
     /// ``lastScheduledPendingNames`` and never advises the local
-    /// notification decider — a manual nudge must never fake a schedule
+    /// Decision-14 auto-apply: the latest pass's verbatim receipt (nil = the
+    /// pass never ran — the master switch defaults OFF). UI surfaces read
+    /// this; nothing here is hidden.
+    @Published private(set) var lastAutoApplyReceipt: AutoApplyRunReceipt?
+
+    /// Decision-14 settings store (global master switch + per-app opt-ins).
+    private let autoApplySettingsStore = AutoApplySettingsStore()
+
+        /// notification decider — a manual nudge must never fake a schedule
     /// event or tune the scheduled-fire baseline.
+    // MARK: Decision-14 auto-apply (opt-in per-app, user-space only)
+
+    /// The amended consent boundary in code (LOCKED decision 14): the master
+    /// switch defaults OFF and per-app opt-in defaults OFF — with both off
+    /// (the shipped state) this pass reads one settings file and returns.
+    /// Gate-cleared apps run the SAME verified chain the CLI --apply uses
+    /// (backup → quit → swap → postScan, receipts verbatim); the gate refuses
+    /// pkg/vendor/MAS/ignored artifacts before any planning, so the
+    /// privileged staged-command path is unreachable from here by
+    /// construction. Serialized on purpose (installs are heavy); relaunch is
+    /// NEVER automatic — the receipt notes the app was swapped and closed.
+    private func runAutoApplyPass(evaluated: [AppRow]) async {
+        let settings = (try? await autoApplySettingsStore.load()) ?? AutoApplySettings()
+        guard settings.autoApplyEnabled else { return }   // master OFF: zero work
+        let engineProbe = ScheduleEngine(fire: { _ in 0 })
+        let onBattery = engineProbe.isOnBattery()
+        let isOnline = engineProbe.isOnline()
+        let running = Set(
+            NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier })
+        let planner = InstallPlanner()
+        let fm = FileManager.default
+        let stagingRoot = appSupportDirectory.appendingPathComponent("staging", isDirectory: true)
+        let backupsRoot = appSupportDirectory.appendingPathComponent("backups", isDirectory: true)
+        try? fm.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: backupsRoot, withIntermediateDirectories: true)
+
+        let passStartedAt = Date()
+        var outcomes: [AutoApplyOutcome] = []
+        for row in evaluated {
+            guard let check = row.check else { continue }
+            let input = AutoApplyGateInput(
+                app: row.app,
+                check: check,
+                autoApplyEnabled: settings.autoApplyEnabled,
+                perAppOptIn: settings.isOptedIn(bundleIdentifier: row.app.bundleIdentifier),
+                policy: schedule.policy,
+                onBattery: onBattery,
+                isOnline: isOnline,
+                runningBundleIdentifiers: running,
+                ruleDecision: row.decision)
+            let decidedAt = Date()
+            switch AutoApplyGate.decide(input) {
+            case .skip(let skip):
+                outcomes.append(AutoApplyOutcome(
+                    app: row.app, decidedAt: decidedAt, decision: .skip(skip)))
+            case .apply:
+                guard let update = check.resolved else { continue }
+                do {
+                    let plan = try planner.plan(app: row.app, update: update)
+                    let installOutcome = try await InstallCoordinator().run(
+                        plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot,
+                        relaunchRequested: false)
+                    outcomes.append(AutoApplyOutcome(
+                        app: row.app, decidedAt: decidedAt, decision: .apply,
+                        installOutcome: installOutcome))
+                } catch {
+                    // Planning/apply failure = an honest receipt, never a crash
+                    // and never a silent skip (decision .apply with the note).
+                    outcomes.append(AutoApplyOutcome(
+                        app: row.app, decidedAt: decidedAt, decision: .apply,
+                        installOutcome: nil, planningNote: String(describing: error)))
+                }
+            }
+        }
+        lastAutoApplyReceipt = AutoApplyRunReceipt(
+            startedAt: passStartedAt, finishedAt: Date(), outcomes: outcomes)
+    }
+
+    // MARK: Terminal typing (GAP #25 wiring — per-use consent)
+
+    /// Runs a staged owner-command in the owner's default terminal via the
+    /// Terminal-typing module. THE CLICK IS THE CONSENT
+    /// (`userApprovedTyping: true` — nothing types without a deliberate
+    /// button press; CopyPaste remains the default surface). The script runs
+    /// via NSAppleScript; the first use triggers macOS's automation
+    /// permission prompt (Terminal/iTerm2), which the owner approves or
+    /// denies — both honest outcomes. Errors surface verbatim in the
+    /// action banner.
+    func typeStagedCommandInTerminal(_ command: String) {
+        do {
+            let store = TerminalEmulatorStore(directory: appSupportDirectory)
+            let emulator = (try store.loadDefault()) ?? .terminal
+            let script = try TerminalScriptBuilder.typingScript(
+                command: command, emulator: emulator, userApprovedTyping: true)
+            var errorInfo: NSDictionary?
+            NSAppleScript(source: script)?.executeAndReturnError(&errorInfo)
+            if let errorInfo {
+                actionError = "Terminal automation failed: \(errorInfo)"
+            }
+        } catch {
+            actionError = "Terminal automation refused: \(error)"
+        }
+    }
+
     func pipelineRows() async throws -> [AppRow] {
         let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
         let checks = await UpdateCheckEngine(

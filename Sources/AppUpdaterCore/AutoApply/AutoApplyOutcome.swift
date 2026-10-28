@@ -36,12 +36,21 @@ public struct AutoApplyOutcome: Codable, Hashable, Sendable {
     /// not run (that fact belongs in the caller's own error surface, never
     /// in a fabricated outcome).
     public var installOutcome: InstallOutcome?
+    /// Set when the gate said .apply but PLANNING failed (e.g. the security
+    /// floor refused a claim without a verifiable sha256) — the honest record
+    /// of an apply attempt that never reached the executor. Additive field
+    /// (coordinator, decision-14 wiring): legacy JSON decodes with nil.
+    public var planningNote: String?
 
-    public init(app: InstalledApp, decidedAt: Date, decision: AutoApplyDecision, installOutcome: InstallOutcome? = nil) {
+    public init(
+        app: InstalledApp, decidedAt: Date, decision: AutoApplyDecision,
+        installOutcome: InstallOutcome? = nil, planningNote: String? = nil
+    ) {
         self.app = app
         self.decidedAt = decidedAt
         self.decision = decision
         self.installOutcome = installOutcome
+        self.planningNote = planningNote
     }
 }
 

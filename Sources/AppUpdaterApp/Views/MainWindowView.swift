@@ -683,9 +683,20 @@ private struct DetailInspector: View {
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 8).fill(.quinary))
-                    Label("Copied to the clipboard — nothing has run.", systemImage: "lock.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Label("Copied to the clipboard — nothing has run.", systemImage: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Button("Type in Terminal…") {
+                            if let command = appState.lastInstallCommand,
+                               command.contains("--apps \(row.app.name)") {
+                                appState.typeStagedCommandInTerminal(command)
+                            }
+                        }
+                        .font(.caption)
+                        .help("Opt-in: types the same command into your default terminal (you attend any password prompt)")
+                    }
                 } else {
                     Text("Stages the exact owner-run CLI command — the app never applies installs itself.")
                         .font(.caption2)
