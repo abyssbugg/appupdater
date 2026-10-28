@@ -1,0 +1,163 @@
+GAP #17 — FSEvents live scan-root monitoring (FileSystemMonitor) · lane fsevents
+================================================================================
+worktree : /Users/datamatics/dev/appupdater/.worktrees/fsevents
+branch   : gap/fsevents (from main @ 29a222a "ui redesign: MacUpdater-class
+           interface — sidebar, real app icons, status pills, detail inspector")
+date     : 2026-10-27
+sole files (git status proof at close):
+    Sources/AppUpdaterCore/Scan/FileSystemMonitor.swift          (new)
+    Tests/AppUpdaterCoreTests/FileSystemMonitorTests.swift       (new)
+    docs/evidence/gap-fsevents-2026-10-27.txt                    (this file)
+
+CONSENT BOUNDARY (LOCKED, repo-wide; encoded in the file header of
+FileSystemMonitor.swift):
+    An FS event may trigger an INVENTORY re-scan only. It must NEVER trigger an
+    automatic source check, an automatic update decision, or any install. The
+    monitor encodes this by construction: its only output is `events` (POSIX
+    path batches) for the coordinator to convert into "re-scan these roots
+    again". Nothing in the file names a check, a source, or an installer.
+
+VERBATIM GATE OUTPUTS (worktree, 2026-10-27, after the temp smoke test was
+removed — committed suite is fake-only by policy):
+
+  swift build 2>&1 | tail -3
+      [Using on-disk description]
+      [1 / 14]
+      Build complete! (0.56 sec)
+  (final capture after deletion: "Build complete! (0.53 sec)" — same PASS)
+
+  swift test 2>&1 | tail -6
+      ◇ Test swapPreservesOldRootMtime() started.
+      ✔ Test swapPreservesOldRootMtime() passed after 0.023 seconds.
+      ◇ Test swapReleasesQuarantineWhenPresent() started.
+      ✔ Test swapReleasesQuarantineWhenPresent() passed after 0.031 seconds.
+      ✔ Suite DeployTests passed after 15.580 seconds.
+      ✔ Test run with 236 tests in 21 suites passed after 15.581 seconds.
+  (236 = 227 baseline + 9 new FileSystemMonitorTests — count matches brief math
+   exactly; repeated ×3 back-to-back green: 14.454 s / 14.433 s / 18.326 s.)
+
+  swiftlint lint --quiet 2>&1 | grep -c ": error: "
+      0
+  (grep exit 1 on zero matches is the grep-not-found signal, not a lint failure.)
+
+BASELINE TEST COUNT NOTE: main at 29a222a already carried 227 (audit figure);
+the suite re-ran at 227 + 9 = 236, matching the brief's "N = 227 + yours".
+
+LIVE SMOKE (real FSEvents proof — temporary test file, run 3×, then REMOVED):
+  File used: Tests/AppUpdaterCoreTests/LiveSmokeTempTests.swift (deleted after
+  the runs; committed suite contains nothing real-FS-touching).
+  Method: real FileSystemMonitor defaults (live factory, real 2 s window),
+  unique NSTemporaryDirectory() dir per run, ONE atomic file write inside the
+  watched dir, then stop; assert ≤1 dequeued event within 5 s, no dupes after a
+  0.5 s grace window, isRunning false + iteration ended after stop.
+
+  verbatim per-run:
+    --- SMOKE RUN 1 ---
+    LIVE-SMOKE event: ["/private/var/folders/7m/.../fsevents-livesmoke-82E5811A-
+    3CB8-4D6B-A452-492F1388B4E2/"] batches: 1
+    ✔ Test liveSmokeOneFileWriteOneEvent() passed after 4.536 seconds.
+    ✔ Test run with 1 test in 1 suite passed after 4.537 seconds.
+    --- SMOKE RUN 2 ---
+    LIVE-SMOKE event: ["/private/var/folders/7m/.../fsevents-livesmoke-717B52EA-
+    0036-4B4F-A70A-FD5ED73E2019/"] batches: 1
+    ✔ Test liveSmokeOneFileWriteOneEvent() passed after 4.568 seconds.
+    ✔ Test run with 1 test in 1 suite passed after 4.568 seconds.
+    --- SMOKE RUN 3 ---
+    LIVE-SMOKE event: [.../fsevents-livesmoke-F2F35231-2148-4CCC-9CD0-82204D6AC
+    9E6/"] batches: 1
+    ✔ Test liveSmokeOneFileWriteOneEvent() passed after 4.626 seconds.
+    ✔ Test run with 1 test in 1 suite passed after 4.627 seconds.
+
+  Reading: exactly ONE debounced event per write, path = the watched ROOT
+  DIRECTORY itself (FSEvents reports the changed directory, possibly with a
+  trailing slash — the monitor forwards verbatim per its honesty table), one
+  batch coalesced, no duplicate/phantom bursts after stop. ~4.5 s wall time per
+  run is the REAL 2 s debounce window + 0.5 s grace + poll granularity — this
+  is real-time proof, deliberate, never in the committed suite.
+
+API/BEHAVIOR PROBES RUN BEFORE IMPLEMENTATION (recorded because two of them
+corrected the lane brief itself — flagged below):
+  1) FSEvents.h (read directly, $(xcrun --show-sdk-path)): the callback's
+     eventPaths payload contract depends on kFSEventStreamCreateFlagUseCFTypes:
+     without it the payload is "a raw C array of raw C strings"; WITH it a
+     "CFArrayRef containing CFStringRef objects". The brief said "FSEventStream
+     Create with kFSEventStreamCreateFlagNone" AND "kFSEventStreamCallback
+     translating CFArray paths to strings" — these two are incompatible: with
+     flag None the payload is NOT a CFArray, and translating it as one is a
+     LIVE CRASH (probe: EXC_BAD_ACCESS inside the callback via objc_msgSend,
+     crash report fsapi-probe3-2026-10-27-220102.ips, stack =
+     FSEvents implementation_callback_rpc → our handler). RESOLUTION: the
+     factory uses kFSEventStreamCreateFlagUseCFTypes (the only flag besides
+     none; no FileEvents/IgnoreSelf/history flags) so the payload IS the
+     CFArray the brief's translation assumes. DEVIATION FLAGGED — not silently
+     rewritten (CLAUDE.md §7).
+  2) Pointer sendability: OpaquePointer's Sendable conformance is UNAVAILABLE
+     in Swift 6 mode on this toolchain (probe compile: "conformance ... is
+     unavailable; this is an error in the Swift 6 language mode"), and
+     UnsafeMutableRawPointer captures inside @Sendable closures error too. Raw
+     pointers therefore ride in @unchecked Sendable boxes (CallbackBox /
+     TeardownBundle) with the judgment documented in-file.
+  3) kFSEventStreamEventIdSinceNow imports as a bare Int/UInt macro on this
+     SDK, not typed UInt64/UInt32 — casts FSEventStreamEventId(...)/
+     FSEventStreamCreateFlags(...) required.
+  4) kFSEventStreamEventIdSinceNow semantics: FSEvents.h — historical events
+     are delivered only when a concrete sinceWhen is supplied; SinceNow starts
+     with contemporary events. So: no history replay at start (future events
+     only) as the brief requires, documented on the factory.
+  5) AsyncStream facts (probe): sequential RE-iteration of a consumed stream
+     drains zero events and finishes immediately (no trap); finish() is
+     idempotent; yield() after finish/termination returns .terminated. These
+     probe-proven semantics are the documented honesty for `events` (single
+     consumer; re-iterate → immediate end).
+  6) FSEvents tolerates watching a NONEXISTENT path (probe: Create+Start both
+     succeed on /nonexistent/uuid) — so the live factory's nil truly means
+     create/start API failure; "root does not exist" is NOT a factory error —
+     the scan layer owns that honesty (Scanner throws on unreadable dirs).
+  7) Full teardown (Stop → Invalidate → Release + exactly-once release of the
+     retained context token, all under the private serial queue) validated
+     live: post-teardown file writes produce NO callback (dropped safely) and
+     the process exits 0 — probe + all 3 smoke runs.
+
+INTEGRATION NOTES (for the coordinator, not this lane):
+  - Exact surface: FileSystemMonitor(factory:clock:sleep:debounceInterval:) —
+    defaults are production-ready (.live, Date(), Task.sleep, 2.0 s).
+  - `monitor.start(rootPaths:)` — pass the scan roots (e.g. the same list the
+    scan engine walks); empty list is refused honestly; watch dedupe is the
+    scan layer's domain, the monitor forwards verbatim.
+  - `for await event in monitor.events` — ONE consumer, held for the app
+    lifetime (re-iteration of a consumed stream terminates immediately —
+    documented + tested; hold ONE monitor per app lifetime, do not fan the
+    stream across tasks).
+  - `monitor.stop()` — idempotent teardown; used on app quit / settings
+    change of scan roots (restart pattern: new monitor instance per start —
+    a stopped instance refuses further starts and reports isRunning=false).
+  - SCOPE GUARD (repeat of the LOCKED boundary): wire event.paths → an
+    INVENTORY re-scan trigger ONLY. Never feed it into source checks,
+    version comparison auto-runs, or install pipelines. The UI surface should
+    state the re-scan may be user-visible but MUST NOT auto-run checks.
+
+LIMITATIONS (honest, per CLAUDE.md §7):
+  - CONFIRMED: create/start success and event delivery semantics on THIS
+    machine/macOS 15 (probes + 3 smoke runs). UNVERIFIED: behavior under
+    external drive unmount (kFSEventStreamEventFlagUserDropped → path "/"
+    events), network-volume roots, and stream restart-after-stop on the same
+    ref (a new monitor instance is the designed restart path instead).
+  - The live factory releases the client-set dispatch queue solely through
+    ARC (no manual dispatch_release — modern Swift allocations manage it);
+    validated live ×3 (no over-release crash observed), but teardown code is
+    the one place a future macOS update could most plausibly change behavior.
+  - `events` buffering is UNBOUNDED by design (no burst dropped before the
+    consumer reads); a coordinator that never drains it would grow memory —
+    the wiring contract (one draining consumer for the app lifetime) prevents
+    that by construction.
+  - The debounce window anchors at the FIRST batch; bursts continuing
+    into a second window legitimately begin the next FileSystemEvent (no
+    sliding-window extension) — documented + tested semantics choice.
+
+git status --short (ownership compliance, at close, before commit of the 3
+files):
+  ?? Sources/AppUpdaterCore/Scan/FileSystemMonitor.swift
+  ?? Tests/AppUpdaterCoreTests/FileSystemMonitorTests.swift
+  ?? docs/evidence/gap-fsevents-2026-10-27.txt
+(no line outside this lane's ownership was touched — verified against the
+clean status before this file existed.)
