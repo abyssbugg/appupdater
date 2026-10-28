@@ -16,6 +16,7 @@
 
 import Foundation
 import IOKit.ps
+import SystemConfiguration
 
 /// MacUpdater-style scheduling engine: a self-contained asynchronous loop that
 /// fires the auto-check trigger according to the user's `SchedulePolicy` and
@@ -48,10 +49,35 @@ import IOKit.ps
 ///   re-arms at the first strictly-future grid point: an interval after the
 ///   skipped slot (or further, after a long oversleep). Battery policy also
 ///   suppresses catch-up: a missed slot will not catch-up-fire while on battery.
+/// - **Offline skip (same template as battery):** a due fire while
+///   `deferWhenOffline && !isOnline()` is DEFERRED the same way — no fire, no
+///   state record, re-arm at the first strictly-future grid point. The probe is
+///   evaluated at the decision moment (loop-top `now` / post-sleep wake), so a
+///   missed slot will not catch-up-fire while offline either. Default policy
+///   `deferWhenOffline == false` never calls the probe.
+/// - **Active-window quiet hours (same template as battery):** with a valid
+///   window configured (`activeWindowStartMinute`/`activeWindowEndMinute`), a due
+///   fire whose DECISION MOMENT's local minute-of-day lies OUTSIDE the window is
+///   DEFERRED — no fire, no state record, re-arm at the first strictly-future
+///   grid point; catch-up is suppressed outside the window too. The window
+///   polices when a fire may HAPPEN, so it is evaluated on the decision moment
+///   (like the battery and offline probes), not on the committed slot — an
+///   overdue slot whose fire would land outside the window waits. Window edge
+///   semantics (decided + documented here, tested): LOCAL minutes-of-day via
+///   `Calendar.current`, half-open `[start, end)` — a moment exactly at `start`
+///   is INSIDE (fires), exactly at `end` is OUTSIDE (skips). The grid itself
+///   never shifts: a skipped slot's successor stays at the next grid point, so
+///   the fire pattern tracks the window day by day. Validity: BOTH endpoints
+///   set, each in `0...1439`, `start < end` — anything else (one endpoint nil,
+///   `start >= end`, out of range) is an invalid window treated as NO
+///   restriction; the loader (`RuleStore.clamped`) normalizes invalid windows to
+///   nil/nil so the settings pane shows what is enforced, and the engine
+///   re-validates independently (same double protection as the interval floor).
+///   No overnight wrap: a window crossing midnight is not representable.
 /// - **Double-fire never:** after every fire (success or failure) the anchor is
 ///   the fire time and the next slot is re-derived from it, strictly future;
-///   battery and missed-slot skips jump to the first strictly-future grid point.
-///   Clamp semantics above keep the step ≥ 15 minutes.
+///   battery, offline, window and missed-slot skips jump to the first
+///   strictly-future grid point. Clamp semantics above keep the step ≥ 15 minutes.
 ///
 /// # SEAMS (injected, all `Sendable`)
 /// - `clock` — "now" for every decision (default: `Date()`).
@@ -59,6 +85,10 @@ import IOKit.ps
 ///   the exact delta to the next slot, so a test-injected fake clock + fake sleep
 ///   make the entire loop deterministic with zero real time.
 /// - `isOnBattery` — power-source probe (default: IOKit IOPS below; no AppKit).
+/// - `isOnline` — network-path probe (default: SCNetworkReachability to a public
+///   IP literal below; no sockets opened, no packets sent — the flags call asks
+///   the system whether a path exists). Consulted only when the policy enables
+///   `deferWhenOffline`.
 /// - `fire` — the scan trigger. Receives the autoCheck bundle-id list and returns
 ///   the count of apps checked, which the engine records into
 ///   ``ScheduleState/lastFireAppsChecked``. On throw, the engine records
@@ -85,6 +115,11 @@ public struct ScheduleEngine: Sendable {
     /// Power-source probe: `true` ⇔ on battery (per the skipOnBattery policy).
     public let isOnBattery: @Sendable () -> Bool
 
+    /// Network-path probe: `true` ⇔ a network path is currently reachable (per
+    /// the deferWhenOffline policy). Never consulted when the policy flag is
+    /// false.
+    public let isOnline: @Sendable () -> Bool
+
     /// The scan trigger. Receives the autoCheck bundle-id list and returns the
     /// number of apps checked. Throwing is how the seam reports a failed check
     /// run; the engine records it (honesty table in ``attemptFire``).
@@ -96,24 +131,30 @@ public struct ScheduleEngine: Sendable {
         clock: @escaping @Sendable () -> Date,
         sleep: @escaping @Sendable (Duration) async throws -> Void,
         isOnBattery: @escaping @Sendable () -> Bool,
+        isOnline: @escaping @Sendable () -> Bool,
         fire: @escaping @Sendable ([String]?) async throws -> Int
     ) {
         self.clock = clock
         self.sleep = sleep
         self.isOnBattery = isOnBattery
+        self.isOnline = isOnline
         self.fire = fire
     }
 
-    /// Production wiring: real clock + `Task.sleep` + the IOPS battery probe, with
-    /// the caller-provided `fire` trigger (the only seam with no sensible default
-    /// — the scan launcher is another engine's job). Closures are assigned by
-    /// explicit branches so each literal gets the declared `@Sendable` type
-    /// (ternary loses contextual @Sendable on this toolchain — gotcha ledger).
+    /// Production wiring: real clock + `Task.sleep` + the IOPS battery probe +
+    /// the SystemConfiguration online probe, with the caller-provided `fire`
+    /// trigger (the only seam with no sensible default — the scan launcher is
+    /// another engine's job). Closures are assigned by explicit branches so each
+    /// literal gets the declared `@Sendable` type (ternary loses contextual
+    /// @Sendable on this toolchain — gotcha ledger).
     public init(fire: @escaping @Sendable ([String]?) async throws -> Int) {
         let clockSeam: @Sendable () -> Date = { Date() }
         let sleepSeam: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
         let batterySeam: @Sendable () -> Bool = { Self.isOnBatteryDefaultProbe() }
-        self.init(clock: clockSeam, sleep: sleepSeam, isOnBattery: batterySeam, fire: fire)
+        let onlineSeam: @Sendable () -> Bool = { Self.isOnlineDefaultProbe() }
+        self.init(
+            clock: clockSeam, sleep: sleepSeam, isOnBattery: batterySeam,
+            isOnline: onlineSeam, fire: fire)
     }
 
     // MARK: - Pure math
@@ -140,6 +181,45 @@ public struct ScheduleEngine: Sendable {
     /// knowledge — the engine never second-guesses it and never skips a slot).
     static func fireArgument(from list: [String]) -> [String]? {
         list.isEmpty ? nil : list
+    }
+
+    // MARK: - Active-window math (pure, tests hit it through @testable)
+
+    /// The policy's active window as a LOCAL minutes-of-day `Range`, or nil when
+    /// there is no restriction. A window is VALID only when both endpoints are
+    /// set, each within `0...1439`, and `start < end` — an invalid window
+    /// (partially configured, degenerate `start == end`, inverted `start > end`,
+    /// out of range) honestly means NO restriction, never "skip everything"
+    /// (an invalid window must not silently stop the scheduler). The loader
+    /// (`RuleStore.clamped`) normalizes invalid windows to nil/nil with the same
+    /// rule; this independent re-validation is the window analog of the interval
+    /// floor's double protection (a hand-edited schedule.json can never produce
+    /// weird gating). No overnight wrap: `start > end` is invalid, not "crosses
+    /// midnight".
+    static func activeWindow(in policy: SchedulePolicy) -> Range<Int>? {
+        guard let start = policy.activeWindowStartMinute,
+              let end = policy.activeWindowEndMinute else { return nil }
+        guard (0...1_439).contains(start), (0...1_439).contains(end), start < end else {
+            return nil
+        }
+        return start..<end
+    }
+
+    /// LOCAL minute-of-day (0...1439) of `date` via `Calendar.current` — quiet
+    /// hours are a user-local-time concept. Tests evaluate the same calendar on
+    /// the same machine, so expectations are machine-consistent without a
+    /// calendar seam.
+    static func minuteOfDay(of date: Date, calendar: Calendar = .current) -> Int {
+        let components = calendar.dateComponents([.hour, .minute], from: date)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+
+    /// `true` ⇔ `moment`'s local minute-of-day lies inside the policy's active
+    /// window (half-open `[start, end)`: start inclusive, end exclusive). No
+    /// valid window → always true (no restriction).
+    static func isInsideActiveWindow(_ moment: Date, policy: SchedulePolicy) -> Bool {
+        guard let window = activeWindow(in: policy) else { return true }
+        return window.contains(minuteOfDay(of: moment))
     }
 
     // MARK: - Loop
@@ -185,15 +265,20 @@ public struct ScheduleEngine: Sendable {
     /// 1. No committed slot → derive from the anchor via `nextFire`; nil there
     ///    (scheduling off, or an invariant break) → honest stream end.
     /// 2. Committed slot due at loop top (persisted miss / start-overdue):
-    ///    battery defer → re-arm at the first strictly-future grid point (no
-    ///    record); catch-up fire (exactly once, then normal cadence); otherwise
-    ///    missed-slot grid-skip to the first strictly-future grid point.
+    ///    policy-skip gates in fixed order — battery, offline, active window —
+    ///    each deferring to the first strictly-future grid point (no record);
+    ///    then catch-up fire (exactly once, then normal cadence); otherwise
+    ///    missed-slot grid-skip to the first strictly-future grid point. A
+    ///    FIRST-EVER fire (nil anchor) passes the same gates first — it is a
+    ///    normal fire, not an exempt one.
     /// 3. Future slot: sleep the exact delta → cancellation surfaces as the
     ///    thrown error → stream finishes (no swallow).
     /// 4. Short wake (woke before slot: keeper jitter or seams) → keep sleeping.
-    /// 5. Due after sleep: battery defer re-arms relative to the WAKE time; a
-    ///    normal fire clears the committed slot — the next one derives from the
-    ///    fire-time anchor (double-fire never).
+    /// 5. Due after sleep: the same three policy-skip gates re-arm relative to
+    ///    the WAKE time (probes evaluated at the decision moment, window on the
+    ///    decision moment's local minute-of-day); a passing fire clears the
+    ///    committed slot — the next one derives from the fire-time anchor
+    ///    (double-fire never).
     ///
     /// Flaw history note (per protocol §4): the first draft re-derived the slot
     /// from a skip-updated ANCHOR, which landed one interval late — a deferred
@@ -245,6 +330,16 @@ public struct ScheduleEngine: Sendable {
                         after: dueAt, intervalSeconds: effectiveInterval, relativeTo: now)
                     continue
                 }
+                if policy.deferWhenOffline && !isOnline() {
+                    slot = Self.firstFutureSlot(
+                        after: dueAt, intervalSeconds: effectiveInterval, relativeTo: now)
+                    continue
+                }
+                if !Self.isInsideActiveWindow(now, policy: policy) {
+                    slot = Self.firstFutureSlot(
+                        after: dueAt, intervalSeconds: effectiveInterval, relativeTo: now)
+                    continue
+                }
                 if anchor == nil {
                     // FIRST-EVER start (coordinator fix at Phase-4
                     // reconciliation, live-evidence-driven): nextFire(nil)
@@ -284,6 +379,16 @@ public struct ScheduleEngine: Sendable {
             let wokeAt = clock()
             guard wokeAt >= dueAt else { continue }
             if policy.skipOnBattery && isOnBattery() {
+                slot = Self.firstFutureSlot(
+                    after: dueAt, intervalSeconds: effectiveInterval, relativeTo: wokeAt)
+                continue
+            }
+            if policy.deferWhenOffline && !isOnline() {
+                slot = Self.firstFutureSlot(
+                    after: dueAt, intervalSeconds: effectiveInterval, relativeTo: wokeAt)
+                continue
+            }
+            if !Self.isInsideActiveWindow(wokeAt, policy: policy) {
                 slot = Self.firstFutureSlot(
                     after: dueAt, intervalSeconds: effectiveInterval, relativeTo: wokeAt)
                 continue
@@ -348,6 +453,27 @@ public struct ScheduleEngine: Sendable {
             candidate = candidate.addingTimeInterval(intervalSeconds)
         }
         return candidate
+    }
+
+    /// Default online probe via SystemConfiguration reachability (no sockets, no
+    /// packets — `SCNetworkReachabilityGetFlags` asks the system whether a
+    /// network path to the target currently exists). Probed against a public IP
+    /// literal (no DNS involved). `true` ⇔ a path is REACHABLE and needs no
+    /// connection intervention; a captive portal (`connectionRequired`) reads as
+    /// offline — the conservative side, deferring a check that would likely
+    /// fail. Unreadable/absent state reads as ONLINE (`true`): the honest asym-
+    /// metric default, mirroring the battery probe's unreadable→AC choice — a
+    /// fire that fails records `lastFireError` (state surfaces the failure), a
+    /// defer records NOTHING (state would silently stall), so when the probe is
+    /// blind the branch with an honest error surface is the one taken. Only
+    /// invoked when the policy enables `deferWhenOffline`.
+    private static func isOnlineDefaultProbe() -> Bool {
+        guard let reachability = SCNetworkReachabilityCreateWithName(nil, "1.1.1.1") else {
+            return true
+        }
+        var flags = SCNetworkReachabilityFlags()
+        guard SCNetworkReachabilityGetFlags(reachability, &flags) else { return true }
+        return flags.contains(.reachable) && !flags.contains(.connectionRequired)
     }
 
     /// Default battery probe via IOKit IOPS (no AppKit, no Process): true ⇔ ANY

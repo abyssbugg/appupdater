@@ -323,7 +323,16 @@ public struct RuleStore: Sendable {
     ///                                    "scheduled off" state; 0 stays 0)
     ///   1...14              → 15        (under-floor values coerce up to the floor)
     ///   >= 15               → unchanged
-    /// skipOnBattery / onWakeCatchUp are passed through untouched.
+    ///   deferWhenOffline    → unchanged (Bool has no invalid state)
+    ///   active window       → carried VERBATIM when valid; an INVALID window
+    ///                         (one endpoint nil, start == end, start > end,
+    ///                         out of 0...1439) is normalized to nil/nil —
+    ///                         no restriction — so the settings pane (which
+    ///                         reads the snapshot's policy) always shows what
+    ///                         is actually enforced. Same validity rule the
+    ///                         engine enforces (`ScheduleEngine.activeWindow`);
+    ///                         the duplication is the window analog of the
+    ///                         interval floor's loader+engine double protection.
     /// Lives here because the persistence lane owns load sanitization; the
     /// engine lane applies it to whatever it loads from schedule.json.
     public static func clamped(_ policy: SchedulePolicy) -> SchedulePolicy {
@@ -332,6 +341,17 @@ public struct RuleStore: Sendable {
             clamped.intervalMinutes = 0   // negative coerced to the explicit off state
         } else if policy.intervalMinutes < 15 {
             clamped.intervalMinutes = 15  // under-floor values coerce up to the floor
+        }
+        let windowIsValid: Bool
+        if let start = policy.activeWindowStartMinute, let end = policy.activeWindowEndMinute {
+            windowIsValid = (0...1_439).contains(start)
+                && (0...1_439).contains(end) && start < end
+        } else {
+            windowIsValid = false
+        }
+        if !windowIsValid {
+            clamped.activeWindowStartMinute = nil
+            clamped.activeWindowEndMinute = nil
         }
         return clamped
     }
