@@ -388,7 +388,10 @@ final class AppState: ObservableObject {
             let checks = await UpdateCheckEngine(
                 sources: await checkSources(),
                 manualSource: manualSourceResolver.engineResolver(
-                    session: .shared, githubCacheDirectory: appSupportDirectory)
+                    session: .shared, githubCacheDirectory: appSupportDirectory),
+                feedDerivation: FeedDerivationResolver { app in
+                    SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
+                }
             ).checkAll(apps: targets)
             lastApps = apps
             lastChecks = checks
@@ -740,7 +743,10 @@ final class AppState: ObservableObject {
         let checks = await UpdateCheckEngine(
             sources: await checkSources(),
             manualSource: manualSourceResolver.engineResolver(
-                session: .shared, githubCacheDirectory: appSupportDirectory)
+                session: .shared, githubCacheDirectory: appSupportDirectory),
+            feedDerivation: FeedDerivationResolver { app in
+                SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
+            }
         ).checkAll(apps: apps)
         lastApps = apps
         lastChecks = checks
