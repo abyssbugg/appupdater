@@ -28,15 +28,30 @@ public struct UpdateCheckEngine: Sendable {
     /// Per-app manual pin seam (nil = no manual behavior; built-ins run as before).
     public let manualSource: ManualSourceResolver?
 
+    /// Feed-derivation seam (nil = off; the feedderive lane's pure module plugs in
+    /// here). For apps that declare NO `sparkleFeedURL`, derived candidate feeds
+    /// (AppCenter/Hockey/DevMate) are attempted through the Sparkle source, each
+    /// claim annotated with its derivation provenance. Declared feeds always win —
+    /// derivation never doubles up a declared check.
+    public let feedDerivation: FeedDerivationResolver?
+
+    /// Upper bound on derived feeds attempted per app (bounds network fan-out).
+    static let maxDerivedFeedAttempts = 3
+
     /// Build an engine. Sources are automatically sorted into precedence order;
     /// unknown-kind sources are kept last (still attempted, winners recorded honestly).
-    public init(sources: [any UpdateSource], manualSource: ManualSourceResolver? = nil) {
+    public init(
+        sources: [any UpdateSource],
+        manualSource: ManualSourceResolver? = nil,
+        feedDerivation: FeedDerivationResolver? = nil
+    ) {
         let precedence = VersionOracle.sourcePrecedence
         let rank: (SourceKind) -> Int = { kind in
             precedence.firstIndex(of: kind) ?? precedence.count
         }
         self.sortedSources = sources.sorted { rank($0.kindValue) < rank($1.kindValue) }
         self.manualSource = manualSource
+        self.feedDerivation = feedDerivation
     }
 
     /// Run one source for one app, appending its claim (or verbatim failure).
@@ -70,6 +85,27 @@ public struct UpdateCheckEngine: Sendable {
             // Manual pin: the pinned source is the ONLY source consulted for
             // this app (see header policy). Built-ins stay silent.
             await attempt(pinned, app: app, into: &candidates, failures: &failures)
+        } else if let sparkleIndex = sortedSources.firstIndex(where: { $0.kindValue == .sparkle }),
+                  app.sparkleFeedURL == nil,
+                  let derivation = feedDerivation {
+            // No declared feed + derivation enabled: the Sparkle source runs
+            // against DERIVED feeds only (bounded), each claim annotated with
+            // its derivation provenance. All other sources run normally.
+            for source in sortedSources where source.kindValue != .sparkle {
+                await attempt(source, app: app, into: &candidates, failures: &failures)
+            }
+            let sparkle = sortedSources[sparkleIndex]
+            for candidate in derivation.derive(app).prefix(Self.maxDerivedFeedAttempts) {
+                var derivedApp = app
+                derivedApp.sparkleFeedURL = candidate.url.absoluteString
+                await attempt(sparkle, app: derivedApp, into: &candidates, failures: &failures)
+                // Annotate the freshest sparkle claim (if any) with provenance.
+                if let last = candidates.last, last.source == .sparkle {
+                    candidates[candidates.count - 1].sourceDetail =
+                        (last.sourceDetail.map { $0 + "; " } ?? "")
+                        + "feed derived from \(candidate.framework) (\(candidate.derivation))"
+                }
+            }
         } else {
             for source in sortedSources {
                 await attempt(source, app: app, into: &candidates, failures: &failures)
@@ -105,6 +141,22 @@ public struct UpdateCheckEngine: Sendable {
         return landing.enumerated().map { index, check in
             check ?? UpdateCheck(app: apps[index], candidates: [], failures: [], resolved: nil)
         }
+    }
+}
+
+// MARK: - Feed-derivation resolver seam
+
+/// Derived-Sparkle-feed seam (coordinator-owned; the feedderive lane's pure
+/// module plugs in here). Given one app, yield the candidate feeds derivable
+/// from update frameworks embedded inside its bundle (may be empty — honest
+/// cannot-derive). The engine attempts each through the Sparkle source, capped,
+/// only when the app declares NO feed of its own.
+public struct FeedDerivationResolver: Sendable {
+    public typealias Derive = @Sendable (InstalledApp) -> [DerivedSparkleFeed]
+    public let derive: Derive
+
+    public init(_ derive: @escaping Derive) {
+        self.derive = derive
     }
 }
 
