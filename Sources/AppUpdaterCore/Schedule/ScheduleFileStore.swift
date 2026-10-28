@@ -18,7 +18,9 @@
 //   - Load CLAMPS the policy through `RuleStore.clamped` (loader owns
 //     sanitization, mirroring the rules lane; the engine clamps again —
 //     double protection, so a hand-edited interval can never hot-loop the
-//     scheduler).
+//     scheduler). Since the sched-depth lane's deferral gates (2026-10-28),
+//     `clamped` also normalizes invalid active windows to no-restriction, so
+//     the policy the settings pane reads back always matches enforcement.
 //   - Writes are atomic (staging file + replaceItemAt/moveItem, same-volume
 //     rename): a failed write never corrupts the previous good file. The
 //     write helper is deliberately file-local (~25 lines, a RuleStore

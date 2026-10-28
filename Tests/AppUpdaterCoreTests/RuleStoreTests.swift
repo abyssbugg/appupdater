@@ -301,6 +301,102 @@ struct RuleStoreTests {
         #expect(clamped.onWakeCatchUp == false)
     }
 
+    // MARK: (7b) SchedulePolicy clamping — offline + active-window fields
+
+    /// The sched-depth deferral fields through the loader clamp: deferWhenOffline
+    /// passes through verbatim (Bool has no invalid state); a VALID window is
+    /// carried verbatim; an INVALID window (one endpoint nil, start == end,
+    /// start > end, out of 0...1439) normalizes to nil/nil — no restriction —
+    /// so the settings pane (which reads the snapshot's policy) can never show
+    /// a restriction the engine does not enforce. The interval ladder is
+    /// untouched by the new fields.
+    @Test func clampedCarriesDeferralFieldsHonesty() {
+        // deferWhenOffline passthrough, both directions.
+        #expect(RuleStore.clamped(
+            SchedulePolicy(intervalMinutes: 60, deferWhenOffline: true)).deferWhenOffline)
+        #expect(!RuleStore.clamped(SchedulePolicy(intervalMinutes: 60)).deferWhenOffline)
+
+        // A valid window is carried verbatim.
+        let valid = RuleStore.clamped(
+            SchedulePolicy(
+                intervalMinutes: 60,
+                activeWindowStartMinute: 480, activeWindowEndMinute: 1_020))
+        #expect(valid.activeWindowStartMinute == 480)
+        #expect(valid.activeWindowEndMinute == 1_020)
+
+        // Invalid shapes → no restriction (nil/nil), matching the engine's
+        // independent validation (ScheduleEngine.activeWindow).
+        let shapes: [(String, Int?, Int?)] = [
+            ("start only", 480, nil),
+            ("end only", nil, 1_020),
+            ("degenerate start == end", 500, 500),
+            ("inverted start > end", 1_200, 100),
+            ("out-of-range start", -1, 100),
+            ("out-of-range end", 0, 1_440),
+        ]
+        for (name, start, end) in shapes {
+            let clampedShape = RuleStore.clamped(
+                SchedulePolicy(
+                    intervalMinutes: 60,
+                    activeWindowStartMinute: start, activeWindowEndMinute: end))
+            #expect(clampedShape.activeWindowStartMinute == nil, "start: \(name)")
+            #expect(clampedShape.activeWindowEndMinute == nil, "end: \(name)")
+        }
+
+        // The nil-window default stays nil (normalization is a no-op) and the
+        // interval ladder still applies with the new fields present.
+        let combined = RuleStore.clamped(
+            SchedulePolicy(
+                intervalMinutes: 5, deferWhenOffline: true,
+                activeWindowStartMinute: 480, activeWindowEndMinute: 1_020))
+        #expect(combined.intervalMinutes == 15)
+        #expect(combined.deferWhenOffline == true)
+        #expect(combined.activeWindowStartMinute == 480)
+        #expect(combined.activeWindowEndMinute == 1_020)
+        let off = RuleStore.clamped(
+            SchedulePolicy(
+                intervalMinutes: -3, deferWhenOffline: true,
+                activeWindowStartMinute: 480, activeWindowEndMinute: 1_020))
+        #expect(off.intervalMinutes == 0)
+        #expect(off.deferWhenOffline == true)
+        #expect(off.activeWindowStartMinute == 480)
+    }
+
+    // MARK: (7c) SchedulePolicy Codable — additive round-trip + legacy decode
+
+    /// New fields survive an encode → decode round trip and are always written
+    /// (encoding stays synthesized: every key present).
+    @Test func policyCodableRoundTripKeepsDeferralFields() throws {
+        let policy = SchedulePolicy(
+            intervalMinutes: 30, skipOnBattery: false, onWakeCatchUp: false,
+            deferWhenOffline: true, activeWindowStartMinute: 480, activeWindowEndMinute: 1_020)
+        let data = try JSONEncoder().encode(policy)
+        let decoded = try JSONDecoder().decode(SchedulePolicy.self, from: data)
+        #expect(decoded == policy)
+
+        let object = try JSONSerialization.jsonObject(with: data)
+        let dict = try #require(object as? [String: Any])
+        #expect(dict["deferWhenOffline"] as? Bool == true)
+        #expect(dict["activeWindowStartMinute"] as? Int == 480)
+        #expect(dict["activeWindowEndMinute"] as? Int == 1_020)
+    }
+
+    /// Decode tolerance — THE backward-compatibility contract: a policy encoded
+    /// by older builds (three original keys, nothing else) decodes cleanly with
+    /// the new fields at their defaults. The three original keys stay REQUIRED
+    /// (a file missing them was already garbage → loader defaults, unchanged).
+    @Test func policyDecodesLegacyJSONWithoutDeferralFields() throws {
+        let legacy = Data(
+            #"{"intervalMinutes":90,"skipOnBattery":false,"onWakeCatchUp":true}"#.utf8)
+        let decoded = try JSONDecoder().decode(SchedulePolicy.self, from: legacy)
+        #expect(decoded.intervalMinutes == 90)
+        #expect(decoded.skipOnBattery == false)
+        #expect(decoded.onWakeCatchUp == true)
+        #expect(decoded.deferWhenOffline == false)
+        #expect(decoded.activeWindowStartMinute == nil)
+        #expect(decoded.activeWindowEndMinute == nil)
+    }
+
     // MARK: (8) Batch evaluate: matching by bundle id, decision-only rows
 
     @Test func batchEvaluateMatchesChecksByBundleIdentifierNotName() async {

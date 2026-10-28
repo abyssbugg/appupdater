@@ -38,6 +38,18 @@ struct ScheduleEngineTests {
         #expect(probe == true || probe == false)
     }
 
+    // MARK: (12b) default online probe — live SystemConfiguration binding
+
+    /// The LIVE default probe runs once through the SystemConfiguration C bridge
+    /// (`SCNetworkReachabilityGetFlags` asks the system about path existence —
+    /// no sockets, no packets). Network-dependent, so either value passes; the
+    /// evidence is the call completing without trapping.
+    @Test func defaultOnlineProbeBindsLiveSystemConfig() {
+        let engine = ScheduleEngine(fire: { _ in 0 })
+        let probe = engine.isOnline()
+        #expect(probe == true || probe == false)
+    }
+
     // MARK: (1) nextFire pure math
 
     /// Pure-math contract: scheduled-off nil; nil lastFireAt → now; +interval
@@ -340,6 +352,257 @@ struct ScheduleEngineTests {
         #expect(post.state.lastFireWasCatchUp == false)
     }
 
+    // MARK: (13) offline gate — defer while offline, fire after reconnect
+
+    /// Mirror of the battery defer test: a due slot while `deferWhenOffline` and
+    /// the seam says offline → deferred honestly (no fire, no snapshot, NO state
+    /// record); after the probe flips online the deferred grid slot fires as a
+    /// NORMAL tick (a policy skip, never a miss, never catch-up).
+    @Test func offlineDeferSkipsAndFiresAfterReconnect() async throws {
+        let harness = Harness()
+        harness.setOnline(false)
+        let run = await runEngine(
+            harness,
+            policy: SchedulePolicy(
+                intervalMinutes: 60, skipOnBattery: false, onWakeCatchUp: true,
+                deferWhenOffline: true),
+            state: ScheduleState(lastFireAt: Self.epoch.addingTimeInterval(-45 * Self.minute))
+        )
+        defer { run.cancelIteration() }
+
+        // Slot (epoch+15min) arrives while offline → deferred honestly.
+        await step(harness, 60)
+        #expect(await waitUntil(harness.fireCount == 1, within: 0.5) == false)
+        #expect(harness.fireCount == 0)
+        #expect(await waitUntil(run.collector.states.count >= 1)) // policy-load snapshot arrival
+        #expect(run.collector.states.count == 1) // only the policy-load snapshot
+
+        // Probe flips online → the deferred grid slot (skip + one interval =
+        // +75min) fires as a NORMAL tick.
+        harness.setOnline(true)
+        await step(harness, 70) // now = epoch+130min ≥ wake (epoch+75min)
+        #expect(await waitUntil(harness.fireCount == 1))
+        #expect(await waitUntil(run.collector.states.count >= 2)) // post-fire snapshot arrival
+
+        #expect(run.collector.states.count == 2)
+        let post = try #require(run.collector.states.last?.state)
+        #expect(post.lastFireWasCatchUp == false)
+        #expect(post.lastFireError == nil)
+        #expect(post.lastFireAt == Self.epoch.addingTimeInterval(130 * Self.minute))
+    }
+
+    /// The offline gate sits before the catch-up branch (exactly like the battery
+    /// gate): an overdue start while offline fires NOTHING; after the reconnect
+    /// the earliest grid fire is a normal tick, never mislabeled as catch-up.
+    @Test func offlineSuppressesCatchUp() async throws {
+        let harness = Harness()
+        harness.setOnline(false)
+        let run = await runEngine(
+            harness,
+            policy: SchedulePolicy(
+                intervalMinutes: 60, skipOnBattery: false, onWakeCatchUp: true,
+                deferWhenOffline: true),
+            state: ScheduleState(lastFireAt: Self.epoch.addingTimeInterval(-30 * Self.minute))
+        )
+        defer { run.cancelIteration() }
+
+        #expect(await waitUntil(harness.fireCount == 1, within: 0.3) == false)
+        #expect(await waitUntil(run.collector.states.count >= 1)) // policy-load snapshot arrival
+        #expect(run.collector.states.count == 1)
+
+        harness.setOnline(true)
+        await step(harness, 90) // deferred grid slot = (epoch-30min) + 2×60min = epoch+90min
+        #expect(await waitUntil(harness.fireCount == 1))
+        #expect(await waitUntil(run.collector.states.count >= 2)) // post-fire snapshot arrival
+        let post = try #require(run.collector.states.last?.state)
+        #expect(post.lastFireWasCatchUp == false)
+    }
+
+    /// Gate inertness: with `deferWhenOffline == false` (the default) the probe
+    /// is never consulted (short-circuit contract — counted by the harness) and
+    /// fires proceed while the seam reports offline.
+    @Test func deferWhenOfflineFalseNeverConsultsTheProbe() async throws {
+        let harness = Harness()
+        harness.setOnline(false)
+        let run = await runEngine(
+            harness,
+            policy: SchedulePolicy(intervalMinutes: 60, skipOnBattery: false, onWakeCatchUp: true),
+            state: ScheduleState(lastFireAt: Self.epoch.addingTimeInterval(-Self.minute))
+        )
+        defer { run.cancelIteration() }
+
+        await step(harness, 59)
+        #expect(await waitUntil(harness.fireCount == 1))
+        #expect(await waitUntil(run.collector.states.count >= 2))
+        let post = try #require(run.collector.states.last?.state)
+        #expect(post.lastFireWasCatchUp == false)
+        #expect(harness.probesCalled == 0) // gate off → probe untouched
+    }
+
+    // MARK: (14) active-window quiet hours
+
+    /// First 15-minute grid point STRICTLY AFTER the epoch (k ≥ 1, so a slot
+    /// parked on it is future at loop start — never the loop-top branch) whose
+    /// LOCAL minute-of-day chain `m, m+15, m+30, m+45` is clock-continuous (no
+    /// DST transition inside the four-slot span) and m ≤ `maxMinute`. Pure
+    /// computation, no engine runs; the engine and the tests both evaluate
+    /// minute-of-day via Calendar.current on the same machine, so the choice is
+    /// machine-consistent without a calendar seam.
+    private static func continuousGrid(maxMinute: Int) -> (date: Date, minute: Int)? {
+        for k in 1...96 {
+            let date = Self.epoch.addingTimeInterval(TimeInterval(k * 15) * Self.minute)
+            let m = ScheduleEngine.minuteOfDay(of: date)
+            guard m <= maxMinute else { continue }
+            let later = [15, 30, 45].map {
+                ScheduleEngine.minuteOfDay(
+                    of: date.addingTimeInterval(TimeInterval($0) * Self.minute))
+            }
+            if later == [m + 15, m + 30, m + 45] { return (date, m) }
+        }
+        return nil
+    }
+
+    /// A slot whose decision moment sits BEFORE the window start is deferred
+    /// (no fire, no snapshot, no record); the next grid point — exactly the
+    /// window start — fires as a normal tick. Grid never shifts.
+    @Test func windowDefersOutsideAndFiresWhenGridReenters() async throws {
+        let base = try #require(Self.continuousGrid(maxMinute: 1_394)) // needs m+45 ≤ 1439
+        let harness = Harness()
+        let policy = SchedulePolicy(
+            intervalMinutes: 15, skipOnBattery: false, onWakeCatchUp: true,
+            activeWindowStartMinute: base.minute + 15,
+            activeWindowEndMinute: base.minute + 45)
+        let run = await runEngine(
+            harness,
+            policy: policy,
+            state: ScheduleState(lastFireAt: base.date.addingTimeInterval(-15 * Self.minute))
+        )
+        defer { run.cancelIteration() }
+
+        // Decision moment at base.minute (before the start) → deferred.
+        await stepTo(harness, base.date)
+        #expect(await waitUntil(harness.fireCount == 1, within: 0.5) == false)
+        #expect(await waitUntil(run.collector.states.count >= 1)) // policy-load snapshot arrival
+        #expect(run.collector.states.count == 1)
+
+        // Next grid point == window START (inclusive) → fires.
+        await stepTo(harness, base.date.addingTimeInterval(15 * Self.minute))
+        #expect(await waitUntil(harness.fireCount == 1))
+        #expect(harness.fireTimes == [base.date.addingTimeInterval(15 * Self.minute)])
+        #expect(await waitUntil(run.collector.states.count >= 2)) // post-fire snapshot arrival
+        let post = try #require(run.collector.states.last?.state)
+        #expect(post.lastFireWasCatchUp == false)
+    }
+
+    /// Edge semantics (decided + documented on the engine): the window is
+    /// half-open `[start, end)` — a decision moment exactly AT the start is
+    /// INSIDE (fires), exactly AT the end is OUTSIDE (skips, silently).
+    @Test func windowStartEdgeInclusiveAndEndEdgeExclusive() async throws {
+        let base = try #require(Self.continuousGrid(maxMinute: 1_394))
+        let harness = Harness()
+        let policy = SchedulePolicy(
+            intervalMinutes: 15, skipOnBattery: false, onWakeCatchUp: true,
+            activeWindowStartMinute: base.minute,
+            activeWindowEndMinute: base.minute + 15)
+        let run = await runEngine(
+            harness,
+            policy: policy,
+            state: ScheduleState(lastFireAt: base.date.addingTimeInterval(-15 * Self.minute))
+        )
+        defer { run.cancelIteration() }
+
+        // Decision moment exactly at the window start → fires.
+        await stepTo(harness, base.date)
+        #expect(await waitUntil(harness.fireCount == 1))
+        #expect(harness.fireTimes == [base.date])
+        #expect(await waitUntil(run.collector.states.count >= 2)) // post-fire snapshot arrival
+
+        // Next slot's decision moment exactly at the window end → deferred:
+        // no second fire, no second snapshot.
+        await stepTo(harness, base.date.addingTimeInterval(15 * Self.minute))
+        #expect(await waitUntil(harness.fireCount == 2, within: 0.5) == false)
+        #expect(await waitUntil(run.collector.states.count >= 2))
+        #expect(run.collector.states.count == 2) // policy-load + the one post-fire snapshot
+    }
+
+    /// nil-window passthrough (the default policy shape): no restriction at any
+    /// local minute — the slot fires wherever it lands on the grid.
+    @Test func nilWindowPassesThroughAtAnyMinute() async throws {
+        let base = try #require(Self.continuousGrid(maxMinute: 1_394))
+        let harness = Harness()
+        let policy = SchedulePolicy(intervalMinutes: 15, skipOnBattery: false, onWakeCatchUp: false)
+        let run = await runEngine(
+            harness,
+            policy: policy,
+            state: ScheduleState(lastFireAt: base.date.addingTimeInterval(-15 * Self.minute))
+        )
+        defer { run.cancelIteration() }
+
+        await stepTo(harness, base.date)
+        #expect(await waitUntil(harness.fireCount == 1))
+        #expect(harness.fireTimes == [base.date])
+    }
+
+    /// Invalid window shapes mean NO restriction (never "skip everything" — an
+    /// invalid window must not silently stop the scheduler). Pure-helper proof of
+    /// every shape the engine's gate and `RuleStore.clamped` agree on.
+    @Test func degenerateAndInvalidWindowsMeanNoRestriction() {
+        let moment = Self.epoch.addingTimeInterval(37 * Self.minute) // arbitrary instant
+        func policy(start: Int?, end: Int?) -> SchedulePolicy {
+            SchedulePolicy(
+                intervalMinutes: 15, skipOnBattery: false, onWakeCatchUp: false,
+                activeWindowStartMinute: start, activeWindowEndMinute: end)
+        }
+        // No window at all.
+        #expect(ScheduleEngine.isInsideActiveWindow(moment, policy: policy(start: nil, end: nil)))
+        // Partially configured (one endpoint only).
+        #expect(ScheduleEngine.isInsideActiveWindow(moment, policy: policy(start: 0, end: nil)))
+        #expect(ScheduleEngine.isInsideActiveWindow(moment, policy: policy(start: nil, end: 1_439)))
+        // Degenerate start == end (empty half-open range).
+        #expect(ScheduleEngine.isInsideActiveWindow(moment, policy: policy(start: 500, end: 500)))
+        // Inverted start > end — no overnight wrap; invalid, not "crosses midnight".
+        #expect(ScheduleEngine.isInsideActiveWindow(moment, policy: policy(start: 1_200, end: 100)))
+        // Out of range.
+        #expect(ScheduleEngine.isInsideActiveWindow(moment, policy: policy(start: -1, end: 100)))
+        #expect(ScheduleEngine.isInsideActiveWindow(moment, policy: policy(start: 0, end: 1_440)))
+        // The validity predicate agrees on every shape (loader twin).
+        #expect(ScheduleEngine.activeWindow(in: policy(start: 480, end: 1_020)) == 480..<1_020)
+        #expect(ScheduleEngine.activeWindow(in: policy(start: 500, end: 500)) == nil)
+    }
+
+    /// UI snapshot honesty: ScheduleSnapshot carries the deferral fields
+    /// verbatim — the policy-load snapshot (what the settings pane reads) AND
+    /// every post-fire snapshot show exactly what the engine enforces.
+    @Test func snapshotCarriesDeferralPolicyFieldsVerbatim() async throws {
+        let base = try #require(Self.continuousGrid(maxMinute: 1_379)) // needs m+60 ≤ 1439
+        let harness = Harness()
+        let policy = SchedulePolicy(
+            intervalMinutes: 60, skipOnBattery: false, onWakeCatchUp: false,
+            deferWhenOffline: true,
+            activeWindowStartMinute: base.minute,
+            activeWindowEndMinute: base.minute + 60)
+        let persisted = ScheduleState(lastFireAt: base.date.addingTimeInterval(-60 * Self.minute))
+        let run = await runEngine(harness, policy: policy, state: persisted)
+        defer { run.cancelIteration() }
+
+        #expect(await waitUntil(run.collector.states.count >= 1))
+        let initial = try #require(run.collector.states.first)
+        #expect(initial.policy == policy) // full Hashable equality incl. new fields
+        #expect(initial.policy.deferWhenOffline == true)
+        #expect(initial.policy.activeWindowStartMinute == base.minute)
+        #expect(initial.policy.activeWindowEndMinute == base.minute + 60)
+
+        // Slot at base (== window start, inclusive) fires; the post-fire
+        // snapshot carries the same policy verbatim.
+        await stepTo(harness, base.date)
+        #expect(await waitUntil(harness.fireCount == 1))
+        #expect(await waitUntil(run.collector.states.count >= 2))
+        let post = try #require(run.collector.states.last)
+        #expect(post.policy == policy)
+        #expect(post.state.lastFireAt == base.date)
+        #expect(post.state.lastFireWasCatchUp == false)
+    }
+
     // MARK: - Harness (fake clock + parked sleeps + fake battery/fire)
 
     private static let defaultIDs = ["com.example.first", "com.example.second"]
@@ -367,6 +630,8 @@ struct ScheduleEngineTests {
         private var now = ScheduleEngineTests.epoch
         private var sleepers: [SleeperEntry] = []
         private var batteryOn = false
+        private var online = true
+        private var onlineProbeCount = 0
         private var throwing: (any Error)?
         private var returnCount = 42
         private var ids = ScheduleEngineTests.defaultIDs
@@ -381,6 +646,14 @@ struct ScheduleEngineTests {
         func currentTime() -> Date { withLock { now } }
         func currentIsOnBattery() -> Bool { withLock { batteryOn } }
         func setBattery(_ on: Bool) { withLock { batteryOn = on } }
+        func setOnline(_ up: Bool) { withLock { online = up } }
+        /// The engine's offline seam. Counts every probe call so the inertness
+        /// of the gate can be asserted (a policy with deferWhenOffline == false
+        /// must never consult the probe — short-circuit contract).
+        func currentIsOnline() -> Bool {
+            withLock { onlineProbeCount += 1; return online }
+        }
+        var probesCalled: Int { withLock { onlineProbeCount } }
         func setIDs(_ newIDs: [String]) { withLock { ids = newIDs } }
         func autoCheckIDs() -> [String] { withLock { ids } }
         func setReturnCount(_ count: Int) { withLock { returnCount = count } }
@@ -512,6 +785,7 @@ struct ScheduleEngineTests {
             clock: { harness.currentTime() },
             sleep: { duration in try await harness.injectedSleep(duration) },
             isOnBattery: { harness.currentIsOnBattery() },
+            isOnline: { harness.currentIsOnline() },
             fire: { list in try await harness.fireSeam(list) }
         )
         let stream = await engine.start(
@@ -537,6 +811,18 @@ struct ScheduleEngineTests {
     private func step(_ harness: Harness, _ minutes: Double) async {
         #expect(await waitUntil(harness.isParked, within: 1))
         harness.advance(by: Self.mins(minutes))
+    }
+
+    /// Park-synchronized advance EXACTLY onto a target instant (the window
+    /// tests' decision moments must equal the computed grid point to the
+    /// second — a fixed-minute advance past it would land the wake at the
+    /// advanced `now`, not at the slot, and corrupt the edge assertions).
+    /// Same start-race discipline as `step`.
+    private func stepTo(_ harness: Harness, _ target: Date) async {
+        #expect(await waitUntil(harness.isParked, within: 1))
+        let delta = target.timeIntervalSince(harness.currentTime())
+        #expect(delta > 0)
+        harness.advance(by: .seconds(delta))
     }
 
     /// Bounded real-time poll for a completion condition (returns false on
