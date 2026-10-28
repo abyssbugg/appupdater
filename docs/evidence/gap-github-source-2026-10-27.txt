@@ -1,0 +1,168 @@
+GAP-CLOSURE LANE EVIDENCE — github-source (GitHub Releases /releases/latest)
+==============================================================================
+Worktree: /Users/datamatics/dev/appupdater/.worktrees/github-source
+Branch:   gap/github-source (from main)
+Date:     2026-10-27
+Scope:    Sources/AppUpdaterCore/UpdateSources/GitHub/GithubSource.swift (new),
+          Tests/AppUpdaterCoreTests/GithubSourceTests.swift (new),
+          docs/evidence/gap-github-source-2026-10-27.txt (this file).
+
+AGENT (verbatim session outputs — commands run in the worktree)
+==============================================================================
+
+$ swift build 2>&1 | tail -3
+[Computing dependencies]
+[Using on-disk description]
+Build complete! (0.69 sec)
+
+$ swift test 2>&1 | tail -6
+◇ Test swapReleasesQuarantineWhenPresent() started.
+✔ Test swapReleasesQuarantineWhenPresent() passed after 0.175 seconds.
+◇ Test swapReleasesQuarantineWhenPresent() ... (DeployTests tail, full suite)
+✔ Suite DeployTests passed after 17.356 seconds.
+✔ Test run with 255 tests in 21 suites passed after 17.357 seconds.
+(exit=0; direct re-run of the same command in a second full pass also showed
+"Test run with 255 tests in 21 suites passed after 16.884 seconds" BEFORE the
+final tidy-ups (one identifier rename + one helper extraction), and the run
+recorded immediately above is the POST-tidy result — both runs green.)
+
+$ swiftlint lint --quiet 2>&1 | grep -c ": error: "
+0
+
+Test delta: main baseline 227 tests / 20 suites → 255 tests / 21 suites
+(= 227 + 28 new GithubSourceTests, +1 suite). No pre-existing test regressed.
+
+DESIGN DELIVERED (per brief, with sources)
+==============================================================================
+- RepoRef (public struct, Sendable + Hashable): validated owner/repo — ASCII
+  alphanumerics + - _ . only, both parts non-empty, private init + failable
+  RepoRef.validated(owner:repo:); `slug` = "owner/repo" cache-key form.
+- GithubSource (public struct: UpdateSource, Sendable; static kind .github):
+  1. init(pinnedOwner:pinnedRepo:directory:session:) — pinned repo is the
+     ONLY candidate; invalid pin = explicit empty list (never a harvest
+     fallback), honest nil with zero requests. Built for the manual-sources
+     lane's coordinator wiring.
+  2. init(repoProvider: (@Sendable (InstalledApp) async -> [RepoRef]?)? = nil,
+     directory: URL, session: URLSession) — directory REQUIRED (non-optional)
+     in both inits, exactly as the brief amended: tests pass unique temp
+     dirs; production wires the real directory at integration. nil provider
+     → default harvest from app.sparkleFeedURL ONLY: https + host exactly
+     "github.com" / "githubusercontent.com" / "raw.githubusercontent.com" →
+     first two path segments (trailing ".git" stripped). Provider returning
+     [] = active "no candidates" (suppresses harvest); nil = fall back to
+     harvest; >2 refs capped to first 2 UNIQUE, order preserved.
+  3. GET https://api.github.com/repos/<owner>/<repo>/releases/latest with
+     Accept: application/vnd.github.v3+json, User-Agent: AppUpdater/0.1
+     (macOS), If-None-Match from the persisted cache. 304 → cached verbatim
+     body; 200 → persist(etag+body) THEN parse; 404 → next candidate / nil;
+     403 + X-RateLimit-Remaining=="0" → THROW verbatim "GitHub API rate
+     limit exhausted (403) — releases/latest for '<owner>/<repo>'"
+     (GithubRateLimitError; surfaces via UpdateCheckEngine.failures through
+     String(describing:)); everything else honest miss.
+  4. Parse: tag_name REQUIRED verbatim (missing/blank → skip; never
+     synthesized), published_at ISO8601 (+fractional-seconds variant,
+     missing → nil), body → releaseNotes, assets[].name +
+     .browser_download_url. Asset pick tie-break: .dmg > .zip; within the
+     winning tier the first arm64/aarch64 name beats everything else
+     (x64-labeled and unlabeled rank equally, array order decides);
+     never .exe/.deb/.rpm/.apk/.AppImage/.pkg; no eligible asset →
+     downloadURL nil = info-only claim (install side already refuses
+     unverifyable bytes). HTTPS-only floor: asset browser_download_url must
+     be https or it is skipped from the pick.
+  5. SHA-256 sidecar: asset named EXACTLY "<chosen>.sha256" → one extra
+     https GET, FIRST whitespace token must be exactly 64 hex chars →
+     sha256Hex (lowercased) + confidence .high; otherwise sha256Hex nil +
+     .medium + sourceDetail says "self-attested upstream source".
+  6. UpdateInfo: source .github, newestShortVersion = tag verbatim,
+     newestBundleVersion nil, minimumSystemVersion nil (release JSON exposes
+     no macOS floor), releaseDate, releaseNotes = body,
+     sourceDetail = "github: <owner>/<repo>; release asset '<name>'" (+ sidecar
+     verify note / self-attested note as applicable).
+- ETag cache: <directory>/github_etag_cache.json, Updatest-shape
+  {"etags": {"<owner>/<repo>": "<raw etag>"},
+   "responses": {"<owner>/<repo>": last release JSON verbatim}}; "verbatim"
+  = body stored as a JSON string value (Data→String→Data round-trips
+  byte-exactly for UTF-8; a re-serialized object would NOT be byte-verbatim).
+  Atomic write (unique staging file + same-volume replaceItemAt/moveItem
+  swap), createDirectory first, corrupt file tolerated as "no cache"
+  (self-heals on next 200), persistence best-effort (write failure never
+  blocks the claim), reload-merge before persist (racing writes bounded:
+  worst case loses an entry, never byte integrity).
+
+TESTS (28, all hermetic — URLProtocol stub per URL, no network, unique temp
+dirs, never /Applications or real Application Support)
+==============================================================================
+RepoRef validation + slug keys; sparkle-feed harvest positives
+(github.com, raw.githubusercontent.com, githubusercontent.com, .git strip,
+subpaths) and negatives (non-github, http, other *.githubusercontent
+subdomains, single segment, empty, nil); harvest end-to-end; provider nil →
+harvest; provider [] suppresses harvest; provider cap to 2 unique; pinned
+happy path (all UpdateInfo fields + request shape: exactly one GET with UA +
+Accept); pinned-only-candidate (no harvest fallback); invalid pin = nil with
+zero requests; missing tag_name honest nil; unparseable JSON honest nil;
+excluded asset types → info-only claim; dmg>zip; extension tier before arch
+labels; arm64>aarch64>x64 within tier; first-match without labels;
+non-https asset skipped from pick; sidecar verified (.high, lowercase hex,
+first-token semantics, exactly one extra request); sidecar malformed content
+honestly unverified; sidecar over http skipped (counts stay 1); sidecar
+absent → self-attested medium; ETag: 200→persist, then 304 reuses the cached
+verbatim body (request-counter proven, If-None-Match asserted, Accept
+asserted on the conditional request); cache read back through an
+INDEPENDENTLY constructed store instance + second source over the same
+directory reuses it; 404 continues to next candidate then claims from the
+second; pinned 404 → honest nil single request; 403 + remaining "0" →
+verbatim throw; 403 + remaining "999" → honest nil; releaseDate tolerance
+(Z, fractional, missing, garbage).
+
+HONEST ASSUMPTIONS & LIMITATIONS (decisions the brief left open, recorded for
+merge review; nothing was silently guessed where the brief was silent)
+==============================================================================
+1. No artifact-vs-app validation: a github claim is NOT checked against the
+   app's name/bundle (CaskSource-style matching does not apply). Evidence
+   basis (UPDATEST-FINDINGS §3.6): the default harvest uses the app's OWN
+   Sparkle feed as attestor, and manual pins are user attestations
+   (Updatest's "username/repo (optional)" model). Documented in the source
+   header, not hidden.
+2. sourceDetail for the no-asset path is a lane-decision string: "github:
+   <owner>/<repo>; no matching macOS release asset — info-only claim" (+ the
+   self-attested note). The brief fixed only the asset-present form; the
+   no-asset case had to say something and says exactly what is true.
+3. Rate-limit throw is IMMEDIATE (not after trying remaining candidates):
+   the limit is account/IP-wide, a second attempt would just 403 again, and
+   a diagnosable failure must not be demoted to a silent nil.
+4. Unverified claims label themselves "sha256 self-attested upstream source
+   (not verified)" inside sourceDetail and ride at confidence .medium —
+   mirroring Updatest's in-product honesty label ("Best-effort update
+   detection. May be rate limited.", "GitHub release data may be inaccurate
+   and downloads are not verified by Updatest") without importing their
+   wording wholesale.
+5. The sidecar fetch is NOT etag-cached (cache keys are owner/repo
+   granularity; the sidecar costs at most one extra request per check —
+   bounded, documented).
+6. Other *.githubusercontent.com subdomains (e.g. objects.githubusercontent)
+   are deliberately NOT harvested in v1 — narrower beats wilder, exactly the
+   three brief-locked hosts.
+7. ETag header absent on a 200 → nothing persisted (an un-etagged body can
+   never be conditionally reused, so caching it is unusable ballast).
+8. The etag304 + cross-store tests use STRONG etag fixtures ("..."): Swift
+   Testing/CFNetwork canon re-quotes weak-validator ("W/...") header values
+   through the URLProtocol stub path, so byte-verbatim round-trip of a W/
+   form could not be pinned in a hermetic test; the source persists whatever
+   header value it actually received, verbatim — that is the honest seam.
+9. swiftlint style warnings (file_length, type_body_length,
+   cyclomatic_complexity 11 on the status-map switch,
+   optional_data_string_conversion for the tolerant UTF-8 decode,
+   static_over_final_class mirrors of the Cask/MASSource stub pattern) remain
+   — the calibrated gate counts ERROR severity, which is 0.
+
+CONFIRMED vs UNVERIFIED
+==============================================================================
+- CONFIRMED: build green; full suite 255/21 green (exit=0); lint
+  error-severity count 0; all lane behaviors above covered by hermetic tests
+  (no real network was touched — URLProtocol stubs only).
+- UNVERIFIED by design (out of hermetic scope): behavior against the LIVE
+  api.github.com (real header quirks, real rate limits). The reverse-engineered
+  recipe records the real-world shapes; live probing is an integration-phase
+  activity and deliberately not part of this lane's gate.
+- Ownership: this lane changed ONLY the three files listed in Scope; git
+  status before commit showed exactly those (plus this file pre-add).
