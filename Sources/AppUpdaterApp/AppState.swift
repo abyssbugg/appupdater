@@ -166,6 +166,14 @@ final class AppState: ObservableObject {
     /// proven per-token pipeline.
     private let caskIndexStore: CaskIndexStore
 
+    /// Manual per-app source pins (gap #2): the owner's attestations. The
+    /// sheet MUTATES this store; the resolver service READS it — one shared
+    /// store, both wired below.
+    let manualSourceStore: ManualSourceStore
+
+    /// Builds the engine's per-app manual-source seam from the shared store.
+    private let manualSourceResolver: ManualSourceResolverService
+
     /// The real Application-Support home (the CLI uses the same path).
     private static let defaultAppSupportDirectory = FileManager.default
         .homeDirectoryForCurrentUser
@@ -209,6 +217,8 @@ final class AppState: ObservableObject {
         self.scanDirectories = scanDirectories
         self.scanLocationStore = ScanLocationStore(directory: support)
         self.caskIndexStore = CaskIndexStore(directory: support)
+        self.manualSourceStore = ManualSourceStore(directory: support)
+        self.manualSourceResolver = ManualSourceResolverService(store: manualSourceStore)
 
         // The router exists before ANY closure (and before `list`) is
         // created, so closures never capture a partially-built AppState.
@@ -347,7 +357,9 @@ final class AppState: ObservableObject {
             let wanted = Set(ids)
             let targets = apps.filter { wanted.contains($0.bundleIdentifier) }
             let checks = await UpdateCheckEngine(
-                sources: await checkSources()
+                sources: await checkSources(),
+                manualSource: manualSourceResolver.engineResolver(
+                    session: .shared, githubCacheDirectory: appSupportDirectory)
             ).checkAll(apps: targets)
             lastApps = apps
             lastChecks = checks
@@ -403,6 +415,10 @@ final class AppState: ObservableObject {
     /// - **Electron** (gap #4): unknown-lane — its claims surface only when
     ///   no stronger source produced one, and (post-amendment) only when
     ///   strictly newer than the installed version.
+    /// - **Manual pins** (gap #2) are wired via the engine's
+    ///   `manualSource` seam at every engine construction site: a pinned app
+    ///   consults ONLY its pin (manual-over-builtin); unpinned apps run the
+    ///   roster above untouched.
     private func checkSources() async -> [any UpdateSource] {
         var sources: [any UpdateSource] = []
         let revalidated = await caskIndexStore.ensureLoaded()
@@ -586,7 +602,9 @@ final class AppState: ObservableObject {
     func pipelineRows() async throws -> [AppRow] {
         let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
         let checks = await UpdateCheckEngine(
-            sources: await checkSources()
+            sources: await checkSources(),
+            manualSource: manualSourceResolver.engineResolver(
+                session: .shared, githubCacheDirectory: appSupportDirectory)
         ).checkAll(apps: apps)
         lastApps = apps
         lastChecks = checks

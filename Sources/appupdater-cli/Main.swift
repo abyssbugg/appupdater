@@ -34,7 +34,9 @@ USAGE:
 scan   : enumerate installed apps (no network). Default roots are
          /Applications plus your custom scan locations (unless --dir given).
 check  : scan + live source lookups (cask > sparkle > mas > github; electron
-         claims only when nothing stronger exists — locked precedence).
+         claims only when nothing stronger exists — locked precedence). A
+         per-app manual pin (manual_sources.json) is consulted INSTEAD of
+         every built-in source for that app (manual-over-builtin).
 install: dry-run install PLAN per --apps (one app for --apply; refusals are
          honest: exit 3, nothing touched). --apply executes the plan for real
          with receipts; exit 0 = applied, 1 = aborted (see outcome.abortedStep),
@@ -157,7 +159,11 @@ struct CliMain {
             sources.append(MASSource())
             sources.append(GithubSource(directory: appSupport, session: .shared))
             sources.append(ElectronSource())
-            let engine = UpdateCheckEngine(sources: sources)
+            let manualService = ManualSourceResolverService(store: ManualSourceStore(directory: appSupport))
+            let engine = UpdateCheckEngine(
+                sources: sources,
+                manualSource: manualService.engineResolver(
+                    session: .shared, githubCacheDirectory: appSupport))
             let checks = await engine.checkAll(apps: apps)
 
             if mode == "check" {

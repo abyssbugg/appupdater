@@ -85,6 +85,7 @@ struct MainWindowView: View {
 
     @State private var showSettingsSheet = false
     @State private var showLocationsSheet = false
+    @State private var showManualSheet = false
     @State private var errorDismissed = false
     @State private var isRefreshing = false
 
@@ -118,6 +119,10 @@ struct MainWindowView: View {
         .sheet(isPresented: $showLocationsSheet) {
             LocationSettingsHost()
                 .frame(minWidth: 460, minHeight: 340)
+        }
+        .sheet(isPresented: $showManualSheet) {
+            ManualSourceHost()
+                .frame(minWidth: 470, minHeight: 380)
         }
         .onChange(of: list.lastError) { _, _ in errorDismissed = false }
         .onAppear {
@@ -185,6 +190,13 @@ struct MainWindowView: View {
                 Image(systemName: "folder.badge.plus")
             }
             .help("Custom scan locations")
+
+            Button {
+                showManualSheet = true
+            } label: {
+                Image(systemName: "pin")
+            }
+            .help("Manual source pins")
         }
     }
 
@@ -413,6 +425,27 @@ struct MainWindowView: View {
 }
 
 // MARK: - List row
+
+/// Host wrapper for ManualSourceSheet (same settable-seam pattern as the
+/// locations host): after a pin change, refresh the INVENTORY scan-only —
+/// a pin change never triggers checks by itself.
+private struct ManualSourceHost: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var pane: ManualSourceSheet {
+        var view = ManualSourceSheet(
+            store: appState.manualSourceStore,
+            apps: appState.list.rows.map { $0.app })
+        view.onChange = {
+            Task { await appState.refreshInventoryOnly() }
+        }
+        return view
+    }
+
+    var body: some View {
+        pane
+    }
+}
 
 /// Host wrapper so LocationSettingsView's settable `onChange` seam (a plain
 /// var — not a chaining modifier) reaches AppState's scan-only refresh
