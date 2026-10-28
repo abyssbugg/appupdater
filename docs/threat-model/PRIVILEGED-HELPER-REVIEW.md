@@ -117,6 +117,9 @@ PKG need.** Reasons, in order of decisiveness:
    stages CLI commands — the password and the action stay with the owner, zero
    standing privilege, and it matches GAP-ANALYSIS #25's planned stance ("we
    stage a copy-paste command (safer, less smooth)").
+   **SHIPPED 2026-10-28 as staged-PKG v1 (`94bfd25`):** the CLI verifies (HTTPS
+   + sha256 + xar! magic) into persistent staging and prints exactly this
+   command; nothing is ever executed by AppUpdater. BUILD-PLAN Phase 8 addendum.
 5. Graduate to the SMAppService daemon ONLY if both become true: (a) Developer
    ID enrollment done, (b) owner wants password-free/MDM-style PKG installs.
    Then implement per §3 mitigations 1–8 exactly as drafted.

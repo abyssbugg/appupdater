@@ -174,3 +174,17 @@ subagents (sole file ownership), coordinator-owned shared-file glue, ff-merge af
   exercised); whole-index cache + weak-ETag verbatim on real disk. Deferred (honest): manual-pin
   live e2e (no CLI pin verb — hermetic seam tests cover), network-volume bookmark live check.
 Tier 2 gaps remain queued; the two watch items stay deferred per owner directive.
+
+### Phase 8 addendum — staged-PKG owner command (2026-10-28, `94bfd25`)
+GAP #11's STAGING half, shipped with zero standing privilege: `.pkg` joined `InstallKind` as
+the staged-owner-command kind. Pkg plan = download → verifySha256 → verifyArtifactMagic
+(xar! gate) → stageOwnerCommand — NO backup/quit/deploy/swap/relaunch/postScan/retention.
+Security floor unchanged (HTTPS + sha256 still required; refusals exit 3). Verified pkg
+bytes land in PERSISTENT staging (`Application Support/staging/staged-pkg/apply-<uuid>/`,
+deliberately outside the per-apply workspace cleanup — the pkg must survive the run), and
+the REAL owner-run command (`sudo installer -pkg "<path>" -target /`) is recorded in
+`InstallOutcome.stagedCommand` (plan carries the `<staged-pkg-path>` template); the CLI
+prints it to stderr after green staging (stdout stays pure JSON; exit 0). AppUpdater NEVER
+executes installer(8) — the install is always the owner's hand action, matching
+PRIVILEGED-HELPER-REVIEW §5b recommendation 4. Gate: 357 tests / 27 suites, swiftlint 0.
+The daemon half (password-free installs) stays parked pending owner sign-off + Developer ID.

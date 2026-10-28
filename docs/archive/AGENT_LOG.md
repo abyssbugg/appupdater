@@ -5,6 +5,29 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-28 — Staged-PKG owner command SHIPPED (GAP #11 staging half, `94bfd25`)
+
+**Confirmed (gate + hermetic tests):** staged-PKG v1 landed in one commit — `InstallKind.pkg`
++ `InstallStep.stageOwnerCommand` + `InstallPlan.stagedCommand` (template) +
+`InstallOutcome.stagedCommand` (real command; both additive optionals, decode-tolerant).
+Pkg plan: download → sha256 → xar! magic → stageOwnerCommand; persistent staging
+`staging/staged-pkg/apply-<uuid>/` (pkg survives the run — the per-apply workspace cleanup
+must never eat the owner's pkg); CLI prints the owner-run `sudo installer -pkg "<path>"
+-target /` to stderr, stdout stays pure JSON, exit 0 on green staging. installer(8) is
+NEVER executed (consent boundary; §5b recommendation 4 shipped as written). Gate:
+**357 tests / 27 suites passed, swiftlint 0 errors** (was 352/27). 5 new tests: pkg planner
+shape + security-floor refusals (HTTP pkg, sha256-less pkg), coordinator green staging
+(receipt order, persistence, no backup/disposition/retention), wrong-magic abort at
+.download (no stagedCommand, nothing staged), downloader xar! happy path. Deploy lane got
+an honest unreachable-case guard (pkg never reaches deploy by construction).
+
+**Notes:** docs batch rides separately (BUILD-PLAN Phase 8 addendum, AGENTS.md entry, §5b
+ship note); CI verified green per push, verbatim. Fake-pkg fixtures are byte checks
+("xar!" prefix), deliberately NOT pkgutil validations — signature review is the owner's
+step before running the staged command.
+
+---
+
 ## 2026-10-27 — Gap-closure sprint (Tier 1) SHIPPED: all six competitor gaps closed (waves 1+2)
 
 **Confirmed (gates + live evidence; full detail in `docs/evidence/gap-sprint-2026-10-27.txt`):**
