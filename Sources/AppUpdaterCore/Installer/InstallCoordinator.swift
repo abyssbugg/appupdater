@@ -282,11 +282,15 @@ public struct InstallCoordinator: Sendable {
         // MARK: .backup — zip the OLD app before anything moves
         do {
             let startedAt = Date()
-            let backup = try await backupManager.backup(app: plan.app, into: backupsRoot)
+            let outcome = try await backupManager.backupWithNote(app: plan.app, into: backupsRoot)
+            let backup = outcome.receipt
             backupReceipt = backup
+            // Time Machine note (delta-backup lane): nil = no TM association; a present
+            // note is the honest detection+adjustment record, appended to the receipt.
+            let tm = outcome.timeMachineNote.map { "; " + $0 } ?? ""
             receipt(.backup, startedAt: startedAt, succeeded: true,
                     detail: "zip backup at \(backup.zipURL.path(percentEncoded: false)) "
-                        + "(\(backup.byteCount) bytes); bundle \((backup.originalPath as NSString).lastPathComponent)")
+                        + "(\(backup.byteCount) bytes); bundle \((backup.originalPath as NSString).lastPathComponent)\(tm)")
         } catch {
             abort(.backup, startedAt: Date(), error: error)
             return done()
