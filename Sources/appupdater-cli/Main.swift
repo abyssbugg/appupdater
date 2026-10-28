@@ -12,6 +12,7 @@ import AppUpdaterCore
 //       honest absence). NEVER synthesizes an update claim.
 //
 //   appupdater-cli install [--apps NAME] [--out FILE] [--apply] [--relaunch]
+//                          [--adopt] [--force]
 //       Resolves the newest claim for the named app and prints an INSTALL PLAN.
 //       WITHOUT --apply this is a dry-run: pure data, nothing downloads or moves.
 //       WITH --apply the executor chain runs for real (download → independent
@@ -26,6 +27,18 @@ import AppUpdaterCore
 //       user's explicit action — the CLI never batches silently. --relaunch
 //       additionally asks LaunchServices to open the swapped bundle.
 //
+//       --adopt (MAS→Homebrew adoption, staged-command lane): for the named
+//       MAS-installed app the gate decides adopt-eligibility against the
+//       whole-index cask catalog ONLY (no sparkle/MAS/github lookups) and
+//       stages the OWNER-RUN `brew install --cask --adopt <token>` — brew is
+//       NEVER executed here. Refusals (not a MAS install / no cask / ambiguous
+//       cask match) exit 3 with the reason; a version mismatch or an unreadable
+//       version refuses unless --force is also passed (then the --force command
+//       variant is staged with an override warning receipt). The paid-App-Store
+//       warning is attached unconditionally (payment is not detectable).
+//       Dry-run (--adopt without --apply) emits the decisions as pure data,
+//       exit 0, refusals recorded in the report; --apply is the consent path.
+//
 // Output: JSON on stdout (or a file via --out). Exit codes: 0 ok, 2 usage error,
 // 3 honest-refusal (not wired / plan rejected), 1 failure.
 
@@ -33,7 +46,7 @@ private let usage = """
 USAGE:
   appupdater-cli scan    [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
   appupdater-cli check   [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
-  appupdater-cli install [--apps NAME] --out FILE [--apply] [--relaunch]
+  appupdater-cli install [--apps NAME] --out FILE [--apply] [--relaunch] [--adopt] [--force]
 
 scan   : enumerate installed apps (no network). Default roots are
          /Applications plus your custom scan locations (unless --dir given).
@@ -49,6 +62,17 @@ install: dry-run install PLAN per --apps (one app for --apply; refusals are
          installer(8). Exit 0 = applied/staged, 1 = aborted (see
          outcome.abortedStep), 3 = plan refused (security floor / no claim),
          2 = usage/target error.
+--adopt: MAS→Homebrew adoption lane for the named app (one app per run).
+         Decides adopt-eligibility against the whole-index cask catalog ONLY
+         and stages the OWNER-RUN `brew install --cask --adopt <token>` —
+         brew is NEVER executed. Not a MAS install / no cask / ambiguous cask
+         match refuse outright (exit 3 with --apply); version mismatch or an
+         unreadable version refuses unless --force is also passed (then the
+         --force command variant is staged with an override warning receipt).
+         The paid-App-Store warning is ALWAYS attached (payment not
+         detectable). Without --apply this is a dry-run: decisions as pure
+         JSON data, exit 0, refusals recorded in the report. --relaunch has
+         no meaning here and is a usage error with --adopt.
 --out FILE writes the JSON there instead of stdout (parent dir must exist).
 """
 
@@ -62,6 +86,8 @@ struct CliMain {
         var outFile: String?
         var applyRequested = false
         var relaunchRequested = false
+        var adoptRequested = false
+        var forceRequested = false
         var positionalModeCount = 0
 
         var index = 0
@@ -94,6 +120,10 @@ struct CliMain {
                 applyRequested = true
             case "--relaunch":
                 relaunchRequested = true
+            case "--adopt":
+                adoptRequested = true
+            case "--force":
+                forceRequested = true
             case "-h", "--help":
                 print(usage)
                 exit(0)
@@ -101,6 +131,19 @@ struct CliMain {
                 printUsage("unknown argument: \(arg)")
             }
             index += 1
+        }
+
+        // --adopt flag discipline: adoption is an install-mode lane, --force is
+        // only its version-gate override consent, and nothing is ever installed
+        // or relaunched by AppUpdater on the adopt path.
+        if adoptRequested, mode != "install" {
+            printUsage("--adopt applies to install only")
+        }
+        if forceRequested, !adoptRequested {
+            printUsage("--force is only meaningful with --adopt")
+        }
+        if adoptRequested, relaunchRequested {
+            printUsage("--relaunch has no meaning with --adopt (AppUpdater never installs or relaunches on the adopt path)")
         }
 
         let appSupport = FileManager.default.homeDirectoryForCurrentUser
@@ -143,6 +186,17 @@ struct CliMain {
 
             if mode == "scan" {
                 try emit(ScanReport(mode: mode, count: apps.count, apps: apps.map(ScanAppSummary.init)), outFile)
+                return
+            }
+
+            // --adopt: the MAS→Homebrew adoption lane. Consults ONLY the
+            // whole-index cask store (no sparkle/MAS/github/electron lookups —
+            // adoption needs the cask identity, not an update claim), so this
+            // branch returns BEFORE the source roster is built below.
+            if mode == "install", adoptRequested {
+                try await runAdopt(
+                    apps: apps, appSupport: appSupport,
+                    apply: applyRequested, force: forceRequested, outFile: outFile)
                 return
             }
 
@@ -272,6 +326,84 @@ struct CliMain {
         }
     }
 
+    /// MAS→Homebrew adoption lane (--adopt; see MASAdoptGate for the full
+    /// refusal matrix). Dry-run: JSON adopt decisions, exit 0, refusals
+    /// recorded honestly as decision values — nothing touched. --apply is the
+    /// consent path: refusals exit 3 with the reason on stderr and write NO
+    /// output file (exit precedes any artifact — the standing gate
+    /// discipline); an eligible decision emits the report and prints the
+    /// owner-run command on stderr (stdout stays pure JSON). brew is NEVER
+    /// executed here; the command is a string for the owner's hand.
+    private static func runAdopt(
+        apps: [InstalledApp], appSupport: URL, apply: Bool, force: Bool, outFile: String?
+    ) async throws {
+        let caskIndex = CaskIndexStore(directory: appSupport)
+        let revalidated = await caskIndex.ensureLoaded()
+        var indexUsable = revalidated
+        if !indexUsable {
+            indexUsable = await caskIndex.isLoaded
+        }
+        guard indexUsable else {
+            let lastError = await caskIndex.lastError
+            errLine(
+                "install --adopt refused: the whole-index cask catalog is unavailable "
+                    + "(\(lastError ?? "not loaded")) — refusing to guess an adopt token.\n"
+            )
+            exit(3)
+        }
+
+        if apply {
+            // Same one-target consent discipline as the artifact apply path.
+            guard apps.count == 1 else {
+                let matched = apps.map { $0.name }.joined(separator: ", ")
+                let listing = matched.isEmpty ? "" : ": \(matched)"
+                errLine(
+                    "install --adopt target discipline: the filter must match exactly ONE installed app (matched \(apps.count)\(listing)).\n"
+                )
+                exit(2)
+            }
+        }
+
+        let gate = MASAdoptGate()
+        let resolver = MASAdoptCaskResolver.store(caskIndex)
+        var decisions: [MASAdoptDecision] = []
+        for app in apps {
+            decisions.append(await gate.decide(app: app, resolver: resolver, force: force))
+        }
+
+        if apply {
+            guard decisions.count == 1, let decision = decisions.first else {
+                errLine("error: adopt decision missing for the single target\n")
+                exit(1)
+            }
+            if let reason = decision.refusalReason {
+                errLine(
+                    "install --adopt refused (\(decision.refusalCode ?? "unknown")): \(reason)\n"
+                        + "Nothing was touched and no output file was written.\n"
+                )
+                exit(3)
+            }
+            try emit(
+                InstallAdoptReport(mode: "install-adopt", count: decisions.count, apps: decisions, applied: true),
+                outFile)
+            if let command = decision.stagedCommand {
+                errLine(
+                    "\nadopt command staged — AppUpdater never runs brew. Run this yourself:\n"
+                        + "  \(command)\n"
+                        + "This replaces the App Store build with the Homebrew (vendor) build; "
+                        + "read the paid-App-Store warning in the report before you run it.\n"
+                )
+            }
+            return
+        }
+
+        // Dry-run: pure data, nothing touched, exit 0 — refusals are honest
+        // decision values in the report (refusalCode/refusalReason), not exits.
+        try emit(
+            InstallAdoptReport(mode: "install-adopt", count: decisions.count, apps: decisions, applied: false),
+            outFile)
+    }
+
     /// The one place stderr bytes come from: argument and refusal messages
     /// are literals here (always UTF-8-encodable), so if encoding somehow
     /// ever failed, this writes nothing instead of crashing a tool that is
@@ -365,6 +497,19 @@ struct InstallApplyReport: Codable {
     var mode: String
     var applied: Bool
     var outcome: InstallOutcome
+}
+
+/// The `install --adopt` report: flat MASAdoptDecision values per app.
+/// Dry-run always emits `applied: false` (data only, refusals included as
+/// decision values). The apply path emits `applied: true` with the staged
+/// owner-run command; refusals never reach the report on the apply path
+/// (they exit 3 first — refusal runs write no output file, the standing
+/// gate discipline).
+struct InstallAdoptReport: Codable {
+    var mode: String
+    var count: Int
+    var apps: [MASAdoptDecision]
+    var applied: Bool
 }
 
 // MARK: - Encoder policy (deterministic reports)
