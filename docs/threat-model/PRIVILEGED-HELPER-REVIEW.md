@@ -13,7 +13,7 @@ minimal, versioned IPC surface to AppUpdater itself:
 - Install operator-approved **PKG** payloads (`installer -pkg`) for the app
   classes our user-space installer refuses today (PKG-distribution updates).
 - Nothing else. No scheduled background installs, no network access, no
-  file дешев management beyond its own install staging area.
+  file management beyond its own install staging area.
 
 Why it exists at all: today the CLI honestly refuses `install --apply` when the
 only artifact is a PKG (Phase 3 documented boundary). The helper is what makes
@@ -83,6 +83,43 @@ that refusal optional instead of permanent — IF the owner wants the risk surfa
 - [ ] Implementation order agreed: threat-model mitigations 1–8 land as
       individually TESTED gates (each mitigation gets its own real test),
       no bundling.
+
+## 5b. Reviewer recommendation (2026-10-27, evidence-based — not an approval)
+
+Both reference apps were reverse-engineered on this exact question
+(docs/reverse/, local-only):
+
+- **MacUpdater** = the resident-daemon shape this doc describes: root
+  LaunchDaemon XPC helper (`com.corecode.MacUpdaterPrivilegedInstallHelperTool2`,
+  SMAppService/MDM-installable silently), peer-validated via SecCode + a pinned
+  "Developer ID Application: CoreCode" requirement, doing root staged swaps AND
+  `installer(8)` PKG installs. It also carries extra surface this project would
+  NOT copy: Full-Disk-Access grant panels with UI automation, an embedded
+  TCC.db reader, a crash-log reader, and a network-callable MDM install script.
+- **Updatest** = the no-daemon shape: **no privileged helper exists at all**
+  (confirmed: no SMJobBless, no embedded helper binaries). Privilege is obtained
+  only by the user typing a sudo password inside a real Terminal window that
+  Updatest scripted (Terminal.app/iTerm2 AppleScript dialects).
+
+**Recommendation: DEFER the daemon; adopt the Updatest shape for any near-term
+PKG need.** Reasons, in order of decisiveness:
+1. The daemon is already blocked on enrollment (§4 residual risk 2): a pinned
+   caller requirement needs Developer ID signing; current posture is ad-hoc
+   signing with notarization abandoned (LOCKED decision 9). It cannot be built
+   securely today regardless of appetite.
+2. Personal-use need is small: our sources surface `.app`-in-dmg/zip payloads
+   (fully covered by the user-space installer); PKG-only updates are a minority
+   and already get an honest refusal.
+3. Standing root is permanent attack surface; Updatest proves the "no resident
+   privilege" product works and ships.
+4. If PKG coverage is wanted BEFORE enrollment, stage the owner-run command
+   (`sudo installer -pkg <staged> -target /`) exactly like Install Now already
+   stages CLI commands — the password and the action stay with the owner, zero
+   standing privilege, and it matches GAP-ANALYSIS #25's planned stance ("we
+   stage a copy-paste command (safer, less smooth)").
+5. Graduate to the SMAppService daemon ONLY if both become true: (a) Developer
+   ID enrollment done, (b) owner wants password-free/MDM-style PKG installs.
+   Then implement per §3 mitigations 1–8 exactly as drafted.
 
 ## 6. Decision box (owner signs here)
 

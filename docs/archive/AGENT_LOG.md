@@ -37,6 +37,14 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
    once in 4 runs, hdiutil timing under parallel load, green on rerun, shared file untouched.
    Lane deviations accepted: CaskIndexStore match API internal (CaskRecord visibility); FS
    `kFSEventStreamCreateFlagUseCFTypes` (brief's None+CFArray combo = proven live crash).
+7. **Post-close-out (same session):** six lane worktrees + `gap/*` branches REMOVED at owner
+   direction (2.1 GB reclaimed; every branch tip equaled its merged commit — nothing unmerged
+   lost; sole worktree left is main `751f561`). Reviewer recommendation recorded in
+   `docs/threat-model/PRIVILEGED-HELPER-REVIEW.md` §5b: **DEFER the SMAppService daemon**
+   (hard-blocked on Developer ID enrollment) and adopt Updatest's no-daemon shape (stage
+   owner-run `sudo installer` commands) for any near-term PKG need; graduate to the daemon
+   only after enrollment AND an explicit owner want for password-free/MDM installs. Typos in
+   the review doc fixed (line 16 corrupted word).
 
 **Watch items unchanged (owner deferred):** v0.1.0-zip-predates-redesign awareness;
 `docs/reverse/` stays local-only/uncommitted.
