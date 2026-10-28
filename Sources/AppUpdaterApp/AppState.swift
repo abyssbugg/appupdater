@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UserNotifications
+import os
 import AppUpdaterCore
 
 /// Shared observable bridge + Phase-4 coordinator wiring: the menu-bar
@@ -50,57 +51,9 @@ import AppUpdaterCore
 @MainActor
 final class AppState: ObservableObject {
 
-    /// Honest refusal reasons surfaced from direct actions and the
-    /// not-yet-wired seam bridge.
-    enum ActionFailure: Error, CustomStringConvertible {
-        case ignoreVersionNeedsClaim
-        case wiringNotComplete
-
-        var description: String {
-            switch self {
-            case .ignoreVersionNeedsClaim:
-                return "ignore-version needs the claimed version — refresh the list first"
-            case .wiringNotComplete:
-                return "app state not fully initialized yet — the call failed honestly, try again after launch"
-            }
-        }
-    }
-
-    /// Capture bridge for the init-scoped closures: on this toolchain a
-    /// closure may not capture a partially-initialized `self` (definite-init
-    /// is enforced even for weak captures), so the two VM seams bind THIS
-    /// router — a fully-initialized `@MainActor` object created BEFORE any
-    /// closure exists. The router holds a weak owner, assigned by init's
-    /// final statement (self fully initialized by then). A bridge call
-    /// arriving before that assignment throws honestly, never crashes.
-    /// (Closures INSIDE methods keep plain weak-self captures — method
-    /// bodies are not analyzed against init's definite-init state.)
-    @MainActor
-    private final class SeamRouter: Sendable {
-        fileprivate weak var owner: AppState?
-
-        fileprivate func refreshRows() async throws -> [AppRow] {
-            guard let owner else { throw ActionFailure.wiringNotComplete }
-            return try await owner.pipelineRows()
-        }
-
-        fileprivate func mutateRule(
-            _ kind: RuleKind, _ bundleID: String, _ version: String?
-        ) async throws -> [AppRow] {
-            guard let owner else { throw ActionFailure.wiringNotComplete }
-            return try await owner.applyRule(kind, bundleID, version)
-        }
-    }
-
-    /// Static factory so the init-scoped closures capture ONLY the router
-    /// (no `self` — the definite-init rule never engages).
-    private static func makeListViewModel(router: SeamRouter) -> ListViewModel {
-        ListViewModel(
-            refreshSource: { try await router.refreshRows() },
-            ruleMutator: { kind, bundleID, version in
-                try await router.mutateRule(kind, bundleID, version)
-            })
-    }
+    // Honest refusal reasons surfaced from direct actions and the seam
+    // bridge (ActionFailure — now in SeamRouter.swift, moved with the bridge
+    // for the file_length gate; behavior unchanged).
 
     // MARK: Published schedule-domain state
 
@@ -207,6 +160,53 @@ final class AppState: ObservableObject {
         .homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/AppUpdater", isDirectory: true)
 
+    /// Log surface for the welcome-tour persistence degradation (see
+    /// AppState+Polish.swift `teardownWelcomeTour`).
+    static let welcomeTourLog = Logger(subsystem: "io.appupdater.AppUpdater", category: "welcome-tour")
+
+    // MARK: GAP #26 polish state (dock presence, welcome tour, migration)
+
+    /// Persisted "Show in: Menu Bar / Menu Bar + Dock" choice. Loaded at
+    /// init; written ONLY via ``setDisplayMode(showInDock:)`` (the settings
+    /// picker's Binding). The launch-time policy/badge decision is
+    /// ``launchShowInDock`` — a mid-session change persists for the NEXT
+    /// launch only (the honest relaunch contract the settings caption
+    /// states verbatim).
+    @Published private(set) var displaySettings: DisplaySettings
+
+    /// Verbatim settings-migration outcome line (nil = the normal
+    /// fresh-envelope / already-current case). A migration FAILURE lands
+    /// here verbatim — never swallowed, never launch-blocking.
+    @Published private(set) var settingsMigrationNote: String?
+
+    /// Verbatim failure of a display-setting save (nil = healthy). Kept
+    /// separate from ``actionError`` so the settings sheet can show it next
+    /// to the control that caused it.
+    @Published private(set) var displayError: String?
+
+    /// The display choice THIS launch was decided with — the activation-
+    /// policy and dock-badge authority. The picker writes
+    /// ``displaySettings`` for the next launch only.
+    /// (Internal, not private: the polish extension AppState+Polish.swift
+    /// owns these behaviors and extensions in another file cannot see
+    /// private members — the same cross-file reality that put
+    /// ``setNotificationsEnabled`` here.)
+    let launchShowInDock: Bool
+
+    /// GAP #26 stores over the shared app-support settings directory (both
+    /// filenames registered in the core SettingsMigration envelope).
+    let displaySettingsStore: DisplaySettingsStore
+    let welcomeTourStore: WelcomeTourStateStore
+
+    /// The welcome-tour window + its delegate holder (NSWindow holds its
+    /// delegate weakly — this is the strong reference). Non-nil only while
+    /// the tour is on screen. Internal: owned by the polish extension
+    /// (AppState+Polish.swift).
+    var welcomeWindow: NSWindow?
+    var welcomeWindowDelegate: WelcomeWindowDelegate?
+    /// The deferred first-launch presentation task (canceled on deinit).
+    var welcomeTask: Task<Void, Never>?
+
     // MARK: Private bookkeeping
 
     /// The authoritative last pipeline outputs; every re-evaluation (rule
@@ -240,6 +240,37 @@ final class AppState: ObservableObject {
     ) {
         let support = appSupportDirectory ?? Self.defaultAppSupportDirectory
         self.appSupportDirectory = support
+
+        // GAP #26: the settings-migration pass runs FIRST — before ANY store
+        // below is constructed or read (the single launch wiring call;
+        // synchronous, so the before-every-store ordering is structural, not
+        // a race). v1 is the identity migration: it stamps the envelope,
+        // transforms nothing. A failure is recorded verbatim in
+        // ``settingsMigrationNote`` and NEVER blocks launch — the stores
+        // then load under their own contracts.
+        let migration = SettingsMigrationService(directory: support)
+        var migrationNoteText: String?
+        do {
+            switch try migration.runIfNeeded() {
+            case .freshEnvelope, .alreadyCurrent:
+                break
+            case .migrated(let from, let to):
+                migrationNoteText = "settings schema migrated \(from) → \(to)"
+            }
+        } catch {
+            migrationNoteText = "settings migration failed — \(error)"
+        }
+
+        // GAP #26 stores (display choice + welcome flag): same shared
+        // directory; both read synchronously HERE because the launch
+        // decisions (activation policy, tour) depend on them before any
+        // window exists (rationale in AppUIStateStores.swift's header).
+        self.displaySettingsStore = DisplaySettingsStore(directory: support)
+        self.welcomeTourStore = WelcomeTourStateStore(directory: support)
+        let display = displaySettingsStore.load()
+        self.displaySettings = display
+        self.launchShowInDock = display.showInDock
+
         self.rules = RuleStore(directory: rulesDirectory)
         self.scheduleStore = ScheduleFileStore(directory: scheduleDirectory)
         self.scanDirectories = scanDirectories
@@ -252,11 +283,15 @@ final class AppState: ObservableObject {
         // created, so closures never capture a partially-built AppState.
         let router = SeamRouter()
         self.seams = router
-        self.list = Self.makeListViewModel(router: router)
+        self.list = router.makeListViewModel()
 
         // Final init statements: self is fully initialized from here on.
         router.owner = self
         installNotificationActionSupport()
+        settingsMigrationNote = migrationNoteText
+        applyLaunchDisplayState(display)
+        presentWelcomeTourIfNeeded()
+        armDockBadgeObserver()
         startScheduler()
         startFileSystemMonitor()
     }
@@ -264,6 +299,7 @@ final class AppState: ObservableObject {
     deinit {
         engineTask?.cancel()
         fsMonitorTask?.cancel()
+        welcomeTask?.cancel()
     }
 
     // MARK: Derived surfaces for the two views
@@ -731,6 +767,25 @@ final class AppState: ObservableObject {
         notificationsEnabled = enabled
     }
 
+    /// Settings-pane writer for the "Show in" picker (GAP #26). Persists
+    /// immediately; the activation policy + dock badge apply on the NEXT
+    /// launch (the caption in ScheduleSettingsView states this verbatim —
+    /// no live-switch theater). On a save failure the in-memory value snaps
+    /// back to the DISK truth and the verbatim error lands in
+    /// ``displayError``. Lives HERE, like ``setNotificationsEnabled``:
+    /// `private(set)` writers cannot be reached from another file's
+    /// extension.
+    func setDisplayMode(showInDock: Bool) {
+        displaySettings = DisplaySettings(showInDock: showInDock)
+        do {
+            try displaySettingsStore.save(displaySettings)
+            displayError = nil
+        } catch {
+            displayError = "display_settings.json save failed — \(error)"
+            displaySettings = displaySettingsStore.load()
+        }
+    }
+
     // MARK: Refresh + rule pipelines (the VM's real seams live here)
 
     /// The full refresh pipeline: scan → per-app source lookups → rules
@@ -941,53 +996,4 @@ final class AppState: ObservableObject {
     }
 }
 
-/// UNUserNotificationCenterDelegate for the app's local notifications.
-/// Deliberately decision-free: it translates UN types to plain strings,
-/// consults the pure core router (`NotificationActionRouter` — unit-proven
-/// without ever spinning a real center), and executes the outcome on the
-/// MainActor through AppState's handler. Lives in this file because the
-/// app-target surface is this lane's owned set; keeping the class here also
-/// keeps the delegate's wiring (`installNotificationActionSupport`) and its
-/// single consumer side by side.
-final class NotificationResponseDelegate:
-    NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
-
-    private let handler: @MainActor (NotificationActionRouter.Outcome) -> Void
-
-    init(handler: @escaping @MainActor (NotificationActionRouter.Outcome) -> Void) {
-        self.handler = handler
-    }
-
-    /// Action button presses AND body taps (the default action). The routing
-    /// DECISION is the pure router's (synchronous, no shared state); only
-    /// the EXECUTION hops to the MainActor. The completion handler is called
-    /// synchronously on the delegate callback thread — it is a non-Sendable
-    /// function value this SDK refuses to send across isolation, and the
-    /// response IS handled at that point (classified + dispatched; the
-    /// handler itself is fast, non-blocking work on the main queue).
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        let outcome = NotificationActionRouter.route(
-            actionIdentifier: response.actionIdentifier,
-            userInfo: response.notification.request.content.userInfo)
-        Task { @MainActor in
-            self.handler(outcome)
-        }
-        completionHandler()
-    }
-
-    /// Banner presentation even while the app is frontmost — this PRESERVES
-    /// the pre-delegate behavior (no delegate meant the system default
-    /// presentation); returning an empty set here would have narrowed it,
-    /// so it doesn't.
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner])
-    }
-}
+// (NotificationResponseDelegate moved to its own file for the file_length gate; wiring above unchanged.)
