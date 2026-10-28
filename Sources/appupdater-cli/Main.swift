@@ -225,7 +225,10 @@ struct CliMain {
             let engine = UpdateCheckEngine(
                 sources: sources,
                 manualSource: manualService.engineResolver(
-                    session: .shared, githubCacheDirectory: appSupport))
+                    session: .shared, githubCacheDirectory: appSupport),
+                feedDerivation: FeedDerivationResolver { app in
+                    SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
+                })
             let checks = await engine.checkAll(apps: apps)
 
             if mode == "check" {
