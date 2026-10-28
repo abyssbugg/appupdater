@@ -5,6 +5,13 @@
 // cask > sparkle > mas > github-optional; `unknown` always last and never
 // auto-selectable while any known source has candidates.
 //
+// AMENDMENT (2026-10-27, gap-closure sprint): `unknown` claims now pass the
+// SAME strictly-greater-than gate as every other kind. Electron vendors
+// republish the installed version verbatim and its probes can fall back to
+// "0.0.0", so an equal or older least-trusted claim must never surface as an
+// update. An unknown claim that IS strictly greater is still surfaced when the
+// list is unknown-only (unknown never beats a known group — unchanged).
+//
 // Honesty rules implemented here (deliberate, tested):
 // - The HIGHEST-precedence group that exists decides alone. A cask "1.2"
 //   claim beats a fresher sparkle "1.9" claim, and if that top group has no
@@ -62,8 +69,10 @@ public struct VersionOracle: Sendable {
     /// tie-broken by confidence, then by input order (stable). If none is
     /// greater → nil: no update, no weaker-source substitution.
     ///
-    /// Unknown claims are only returned when the list is unknown-only — the
-    /// caller decides what to show.
+    /// Unknown claims are only returned when the list is unknown-only, and
+    /// then only when strictly greater than the installed version (amendment
+    /// 2026-10-27 in the file header) — an equal/older unknown claim surfaces
+    /// nothing at all.
     public func resolve(candidates: [UpdateInfo], installedShortVersion: String?) -> UpdateInfo? {
         guard !candidates.isEmpty else { return nil }
 
@@ -75,13 +84,14 @@ public struct VersionOracle: Sendable {
         for kind in Self.sourcePrecedence + [.unknown] {
             guard let group = groups[kind], !group.isEmpty else { continue }
 
-            if kind == .unknown {
-                // Reached only when no known source produced candidates at all.
-                // Surface the (least-trusted) claim for the caller to judge;
-                // do not attempt versionGreater gating — unknown versions are
-                // usually garbage anyway. First wins (stable).
-                return group.first
-            }
+            // The SAME strictly-greater gate applies to the `.unknown` group
+            // (file-header amendment): reached only when NO known source
+            // produced candidates at all, and only claims strictly greater
+            // than the installed version are eligible — Electron vendors
+            // republish the installed version and probes can fall back to
+            // "0.0.0", so an equal/older least-trusted claim never surfaces
+            // as an update. Greatest eligible wins (confidence breaks ties
+            // within the group; duplicates stay first-wins stable).
 
             // Unparseable installed version ≈ no installed version (documented).
             let installed: AppVersion? = {

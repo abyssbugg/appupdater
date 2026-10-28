@@ -316,12 +316,26 @@ import Foundation
         #expect(oracle.resolve(candidates: candidates, installedShortVersion: "1.0")?.sourceDetail == "unknown-only")
     }
 
-    @Test func unknownOnlyMultipleStableFirst() {
+    @Test func unknownOnlyMultipleGreatestWins() {
+        // AMENDED 2026-10-27: unknown claims pass the same strictly-greater
+        // gate/selection as known kinds — greatest eligible wins (was:
+        // ungated stable-first).
         let candidates = [
             info(.unknown, "9.9", detail: "u-first"),
             info(.unknown, "10.0", detail: "u-second"),
         ]
-        #expect(oracle.resolve(candidates: candidates, installedShortVersion: nil)?.sourceDetail == "u-first")
+        #expect(oracle.resolve(candidates: candidates, installedShortVersion: nil)?.sourceDetail == "u-second")
+    }
+
+    @Test func unknownClaimsPassSameStrictlyGreaterGate() {
+        // Equal unknown claim → NOT an update (never surfaced):
+        #expect(oracle.resolve(candidates: [info(.unknown, "1.0", detail: "u-eq")], installedShortVersion: "1.0") == nil)
+        // Older unknown claim → nothing:
+        #expect(oracle.resolve(candidates: [info(.unknown, "0.9", detail: "u-old")], installedShortVersion: "1.0") == nil)
+        // Greater unknown claim → surfaced (unknown-only list):
+        #expect(oracle.resolve(candidates: [info(.unknown, "1.1", detail: "u-new")], installedShortVersion: "1.0")?.sourceDetail == "u-new")
+        // zero-fill equivalence: "1.0.0" claims equal "1.0" installed → NOT an update:
+        #expect(oracle.resolve(candidates: [info(.unknown, "1.0.0", detail: "u-fill")], installedShortVersion: "1.0") == nil)
     }
 
     @Test func unknownNeverAutoSelectedOverKnown() {
