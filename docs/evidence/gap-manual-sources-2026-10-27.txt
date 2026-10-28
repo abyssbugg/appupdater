@@ -1,0 +1,211 @@
+GAP-CLOSURE LANE EVIDENCE — manual-sources (gap #2: per-app manual source pins)
+===============================================================================
+Worktree: /Users/datamatics/dev/appupdater/.worktrees/manual-sources
+Branch:   gap/manual-sources (from main @ a25094a, wave-1 files included)
+Date:     2026-10-27
+Scope:    Sources/AppUpdaterCore/Manual/ManualSourceStore.swift (new),
+          Sources/AppUpdaterCore/Manual/ManualSourceResolver.swift (new),
+          Sources/AppUpdaterApp/Views/ManualSourceSheet.swift (new),
+          Tests/AppUpdaterCoreTests/ManualSourceTests.swift (new),
+          docs/evidence/gap-manual-sources-2026-10-27.txt (this file).
+
+AGENT (verbatim gate outputs — commands run in the worktree)
+==============================================================================
+
+$ swift build 2>&1 | tail -3
+[12 / 13] appupdater-cli-product
+[14 / 14] AppUpdaterApp-product
+Build complete! (1.89 sec)
+
+$ swift test 2>&1 | tail -6
+◇ Test swapPreservesOldRootMtime() started.
+✔ Test swapPreservesOldRootMtime() passed after 0.022 seconds.
+◇ Test swapReleasesQuarantineWhenPresent() started.
+✔ Test swapReleasesQuarantineWhenPresent() passed after 0.031 seconds.
+✔ Suite DeployTests passed after 11.454 seconds.
+✔ Test run with 352 tests in 27 suites passed after 11.454 seconds.
+
+$ swiftlint lint --quiet 2>&1 | grep -c ": error: "
+0
+
+Test delta: baseline in this worktree 334 tests / 26 suites → 352 / 27
+(= 334 + 18 new ManualSourceTests, +1 suite). No pre-existing test regressed;
+the run above is a FULL clean gate (build + test + lint) from this lane, and
+the repo's flake-proof protocol was re-proven on this lane: 3 back-to-back
+full `swift test` runs (2 green + 1 environmental flake, see below) plus TWO
+CONCURRENT full runs both green:
+
+  A: ✔ Test run with 352 tests in 27 suites passed after 14.091 seconds.
+  B: ✔ Test run with 352 tests in 27 suites passed after 15.947 seconds.
+
+One-off flake observed during the ×3 protocol (NOT this lane's code):
+happyDmgApplyEndToEndNoLeftoverMounts (InstallCoordinatorTests, shared file
+outside this lane's ownership) failed once of 4 full runs with
+"info.stdout.contains(".dmgmount-") == false" — real hdiutil attach/detach
+timing under parallel-suite load; passed on every rerun (3× consecutive +
+2× concurrent). Flagged to the coordinator; this lane edited nothing in
+that file.
+
+DESIGN DELIVERED (per brief — GAP-ANALYSIS.md item #2/#8, UPDATEST §3.11)
+===============================================================================
+- ManualSource (public struct: Codable, Hashable, Sendable, Identifiable):
+  `id` = UUID string minted at add; `bundleID` = target app bundle identifier
+  (the matcher key — matched EXACTLY, no case folding); nested
+  `Kind: String { github, cask }` (frozen raw values = persisted tag AND sort
+  key; `label` "GitHub release" / "Homebrew cask"); `owner`/`repo` (github
+  only), `token` (cask only), `createdAt`; computed `targetDescription`
+  ("owner/repo" | token, missing fields render "—", never invented). Full
+  public init with honest defaults (id/createdAt mint; kind REQUIRED).
+- ManualSourceStore (final class, @unchecked Sendable + serial NSLock —
+  mirrors ScanLocationStore; holds NO mutable state, disk is the single
+  source of truth, every verb re-reads under the lock):
+  init(directory:) REQUIRED explicit (no default convenience — production
+  dir wiring is the coordinator's); pins() throws (sorted bundleID → kind →
+  createdAt); add(githubPin:repo:bundleID:) / add(caskPin:bundleID:) /
+  remove(id:) throw ManualSourceError(reason:) with verbatim human texts.
+  manual_sources.json, JSONEncoder [.prettyPrinted, .sortedKeys], default
+  date strategy, shape {"schemaVersion": 1, "pins": […]}. Missing file →
+  pins() == [] and NOTHING is created (lazy). Corrupt/unsupported-schema
+  file → clean throw naming the directory + "has not been modified or
+  deleted — fix or remove it manually"; bytes tested byte-identical after
+  the throw; NEVER auto-deleted. Writes atomic (staged createFile outside
+  the target name + replaceItemAt/moveItem same-volume swap).
+  Validation ladder (each refusal never touches disk): bundleID non-empty
+  after trim → github slug through the SAME RepoRef.validated alphabet
+  GithubSource itself admits → cask token non-empty after trim with NO
+  whitespace → duplicate SAME bundleID+kind refusal naming the bundle id
+  AND the existing pin's targetDescription. One pin per (bundleID, kind)
+  pair; a bundle id MAY hold both kinds at once (documented choice —
+  resolver picks first-in-store-sort, cask sorts before github, so the
+  pick stays deterministic). A pin for a bundle id not present in any scan
+  is lawful (the store validates TEXT, never the scan set).
+- ManualSourceResolverService (final class, Sendable: immutable lets only —
+  store + nothing else):
+  init(store: ManualSourceStore) — DELIBERATE DEVIATION from the brief's
+  bare `init()`: a service with no store could never read pins without
+  hardcoding the real directory (lane-forbidden); the store is the only
+  honest carrier and the coordinator already owns store construction for
+  the sheet. Stateless BY BEHAVIOR: pins re-read from disk per call,
+  sources constructed per call, nothing cached.
+  source(for:session:githubCacheDirectory:) -> (any UpdateSource)? — reads
+  pins(); picks the ONE pin with bundleID == app.bundleIdentifier (first
+  in store sort order); no pin / store-read failure → nil. HONEST CAVEAT
+  (documented in-file): the engine seam has no error channel for the
+  resolver itself, so a corrupt store degrades to "no pin for this app"
+  (built-ins would run again for it); the sheet is where store corruption
+  surfaces verbatim. github pin → GithubSource(pinnedOwner:pinnedRepo:
+  directory:session:) returned AS-IS (its own rate-limit honesty, ETag
+  cache in githubCacheDirectory, asset pick apply); cask pin →
+  ManualCaskSource(token:session:).
+  engineResolver(session:githubCacheDirectory:) -> ManualSourceResolver —
+  the portal: `ManualSourceResolver { app in await self.source(for: app,
+  session: session, githubCacheDirectory: githubCacheDirectory) }`.
+- ManualCaskSource (public struct: UpdateSource, Sendable; static kind
+  .cask; init(token:session:)): replicates the single-token pipeline via
+  the PUBLIC CaskDocumentClient.lookup (same endpoint, same status
+  branching, same tolerant decode, same CaskMatching artifact validation —
+  nothing re-implemented). .info(UpdateInfo) → returned with sourceDetail
+  extended "manual cask pin '<token>'" (the report shows the claim came
+  from the owner's attestation). .notFound/.noResult → honest nil: a
+  manual pin does NOT manufacture claims and the engine never falls back
+  to built-ins for a pinned app.
+- ManualSourceSheet (public struct View, AppUpdaterApp target, compiles
+  against PUBLIC core API only): init(store:apps:) + public var onChange
+  (refresh seam, mirrors LocationSettingsView's usage shape). Pin rows
+  show display name (matched from apps by bundleIdentifier, raw bundleID
+  fallback for pins without a scanned app), kind capsule, monospaced
+  targetDescription, added date, Remove button. Add controls: app Picker
+  (deduped by bundleIdentifier — duplicate installs share one pin), kind
+  Picker, kind-conditional TextFields (owner+repo | token), Add button
+  through the matching store verb; refusals/errors surface VERBATIM in a
+  red selectable line. Empty state pinned: "No manual pins — sources
+  auto-detect updates on their own." @MainActor-only mutations, no force
+  unwrap, Swift 6 strict concurrency clean.
+- Tests (18, hermetic — per-file URLProtocol stub, unique temp root per
+  test, zero network, never /Applications or real App Support):
+  store round-trip across independent instances + persisted-shape check +
+  lazy creation; canonical sort ladder incl. the createdAt tie-break
+  (schema-valid handcrafted file); both-kinds-per-bundle-id coexistence;
+  duplicate refusals verbatim (github + cask) with disk untouched;
+  invalid slug refusals (same alphabet as RepoRef); cask token
+  whitespace/empty refusals + trimmed acceptance; empty bundleID
+  refusals; remove unknown-id honesty + re-add after removal; corrupt
+  file clean rethrow with byte-identical bytes (pins() AND add()); 404
+  schemaVersion clean text; resolver nil paths with ZERO asserted
+  requests (no pin; corrupt store reads as no pin — documented caveat);
+  github pin end-to-end through the RETURNED source (tag verbatim, only
+  the pinned URL contacted, app's own sparkle feed never harvested); cask
+  pin end-to-end (claim .cask, sourceDetail carries "manual cask pin");
+  cask 404 → nil (no manufactured claims); other-app-no-pin → nil with
+  zero requests even while stubs registered (identity = bundleIdentifier
+  exactly). THE SEAM (mirroring the coordinator's IntegrationTests fakes
+  with hit-count actors): UpdateCheckEngine(sources: [fake .cask builtin
+  claiming "9.9"], manualSource: service.engineResolver(…)) — pinned app →
+  the PINNED claim wins (1.4.2/.github) with the builtin counter at 0;
+  the SAME engine's unpinned app → builtin consulted normally (counter 1);
+  no-pins engine behaves IDENTICALLY to a plain UpdateCheckEngine(sources:)
+  (UpdateCheck equality + both counters 1); pinned cask 404 → verdict
+  "unknown", no builtin fallback, no fake claims.
+
+HONEST ASSUMPTIONS & LIMITATIONS
+===============================================================================
+1. Service init carries the store (deviation from the brief's bare init(),
+   reason above); the coordinator wires `ManualSourceStore(directory:)`
+   once and shares it between sheet and resolver service (exclusivity is
+   the store's serial lock; sheet mutations are visible to the next
+   check's re-read, never mid-file).
+2. Pin matching is by bundleIdentifier EXACTLY. Two InstalledApps sharing
+   a bundle id (duplicate installs) are covered by ONE pin — intentional,
+   mirrors the pins-are-per-bundle-id model and Updatest's per-app pin.
+3. When a bundle id holds BOTH kinds, the store sort (cask < github)
+   deterministically picks the cask pin; there is no UI to prefer one
+   kind over the other beyond removing a pin (documented in-file).
+4. A corrupt manual_sources.json reads as "no pin" through the engine
+   seam (no resolver error channel exists in the frozen seam). Mitigation
+   is the sheet's verbatim error line + the never-auto-delete contract;
+   if the coordinator later wants engine-side visibility, the seam itself
+   must grow a channel (out of this lane's ownership).
+5. The Sparkle-appcast manual override form (Updatest's third manual type)
+   is deliberately not modeled — no source lane exists to resolve it yet;
+   adding a third Kind later is additive to the JSON schema (schemaVersion
+   stays 1; unknown kinds decode-fail into the clean never-auto-delete
+   contract, never silently dropped).
+6. Cask pins validate only single-word tokens (no whitespace); token
+   existence/validity is NOT checked at add time (the store is offline) —
+   a wrong token honestly answers nil ("unknown" verdict) per check, and
+   the cask 404 test pins that behavior.
+7. Sheet compile-safety is exercised by `swift build` (App target) —
+   no UI unit tests exist anywhere in the repo for app-target views
+   (house pattern: LocationSettingsView is also build-checked only).
+
+INTEGRATION NOTES (for the coordinator)
+===============================================================================
+Exact init signatures (verbatim):
+  ManualSourceStore(directory: URL)                                        // throws nothing at init
+  ManualSource.init(id: String = UUID().uuidString, bundleID: String,
+      kind: ManualSource.Kind, owner: String? = nil, repo: String? = nil,
+      token: String? = nil, createdAt: Date = Date())
+  store.pins() throws -> [ManualSource]                                    // sorted bundleID → kind → createdAt
+  store.add(githubPin owner: String, repo: String, bundleID: String) throws
+  store.add(caskPin token: String, bundleID: String) throws
+  store.remove(id: String) throws
+  ManualSourceResolverService(store: ManualSourceStore)
+  service.source(for app: InstalledApp, session: URLSession,
+      githubCacheDirectory: URL) async -> (any UpdateSource)?
+  service.engineResolver(session: URLSession, githubCacheDirectory: URL)
+      -> ManualSourceResolver
+  ManualCaskSource(token: String, session: URLSession)                     // also a public UpdateSource
+
+Wiring (suggested, mirrors the seam's own doc):
+  let store = ManualSourceStore(directory: appSupportDir)                  // e.g. ~/Library/Application Support/AppUpdater
+  let service = ManualSourceResolverService(store: store)
+  engine = UpdateCheckEngine(sources: builtins,
+      manualSource: service.engineResolver(session: realSession,
+          githubCacheDirectory: appSupportDir))
+  // Sheet (SwiftUI, app target):
+  var sheet = ManualSourceSheet(store: store, apps: scannedApps)
+  sheet.onChange = { /* re-scan / re-check hook */ }
+  // present sheet in a .sheet { sheet } — formStyle(.grouped), min 460×380.
+Where the sheet belongs: next to LocationSettingsView's hosting surface
+(e.g. a "Manual Sources" row in the settings navigation opening the sheet),
+supplying the SAME store instance as the engine's resolver service.
