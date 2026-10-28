@@ -31,6 +31,14 @@ import AppUpdaterCore
 ///   authorization and posts ONE summary. Denial is stated honestly, never
 ///   faked as success. Ask-per-fire (with `deliverImmediately: false`) keeps
 ///   the flow boring; macOS itself caches the user's standing answer.
+///   Actionable extension (tier-2 gap, 2026-10-28): when the diff is
+///   EXACTLY ONE stageable app, the notification carries the
+///   `NotificationActionIDs.categoryPendingUpdate` category ("Open
+///   AppUpdater" / "Stage Install Command") and its actions route through
+///   the SAME consent boundary — Open brings the main window forward, Stage
+///   stages the owner-run CLI command via ``requestInstall``. NOTHING is
+///   ever executed or auto-applied; fires without actionable content keep
+///   the existing passive summary byte-for-byte.
 /// - Schedule.json persistence is real (ScheduleFileStore): every engine
 ///   snapshot lands on disk; the UI's schedule lines always reflect the
 ///   last snapshot the engine emitted.
@@ -136,6 +144,26 @@ final class AppState: ObservableObject {
     /// past denial — the next fire's outcome is what overwrites it).
     @Published private(set) var notificationsState: String?
 
+    /// The live UNUserNotificationCenter delegate. UNUserNotificationCenter
+    /// holds its delegate WEAKLY, so AppState keeps the strong reference for
+    /// the app's lifetime. The delegate carries NO decisions — it only
+    /// translates UN types to plain strings, consults the pure core router
+    /// (`NotificationActionRouter`, unit-proven) and hops to this actor for
+    /// execution.
+    private var notificationDelegate: NotificationResponseDelegate?
+
+    /// Optional SwiftUI window-opening seam for the notification "Open"
+    /// action. `openWindow(id:)` exists ONLY in view context (the scenes
+    /// live in AppUpdaterApp.swift — outside this lane's file ownership), so
+    /// the default implementation in ``openMainWindowFromNotification``
+    /// brings the EXISTING main window forward via AppKit. This property is
+    /// the one-line wiring point for the scene owner. HONEST LIMITATION
+    /// while it stays unwired: with the seam nil and the window already
+    /// closed by the user, the action still activates the app (menu bar
+    /// forward) but cannot recreate the closed SwiftUI scene window — stated
+    /// here rather than faked as success.
+    var mainWindowOpener: (() -> Void)?
+
     // MARK: Composition root
 
     /// Window list view model, wired to the REAL refresh + rule seams below
@@ -228,6 +256,7 @@ final class AppState: ObservableObject {
 
         // Final init statements: self is fully initialized from here on.
         router.owner = self
+        installNotificationActionSupport()
         startScheduler()
         startFileSystemMonitor()
     }
@@ -365,16 +394,14 @@ final class AppState: ObservableObject {
             lastChecks = checks
             let evaluated = await rules.evaluate(apps: apps, checks: checks)
             await list.setRows(evaluated)
-            await recordScheduledFireOutcome(
-                appsChecked: targets.count, pendingNames: pendingNames(in: evaluated))
+            await recordScheduledFireOutcome(appsChecked: targets.count, evaluatedRows: evaluated)
             return targets.count
         }
         lastApps = apps
         lastChecks = []
         let evaluated = await rules.evaluate(apps: apps, checks: [])
         await list.setRows(evaluated)
-        await recordScheduledFireOutcome(
-            appsChecked: apps.count, pendingNames: pendingNames(in: evaluated))
+        await recordScheduledFireOutcome(appsChecked: apps.count, evaluatedRows: evaluated)
         return apps.count
     }
 
@@ -483,21 +510,20 @@ final class AppState: ObservableObject {
 
     // MARK: Scheduled-fire notification side-effects (both branches)
 
-    /// Per-app display names of the pending rows a fire produced
-    /// (updateAvailable == true). Pure transform over the evaluated rows —
-    /// read from the fire's OWN rows, never from `list.rows`, so a manual
-    /// refresh racing a scheduled fire can never bleed into this decision.
-    private func pendingNames(in rows: [AppRow]) -> [String] {
-        rows.filter { $0.updateAvailable }.map { $0.app.name }
-    }
-
     /// The one place per scheduled-fire completion. Order is deliberate:
     /// 1. The UNCONDITIONAL distributed event (scriptability contract in
     ///    `NotificationNames` — both branches, regardless of any decision).
     /// 2. The fire-to-fire decision (nil baseline suppresses), then the
     ///    new pending set becomes the stored baseline EVEN when suppressed —
     ///    the next fire must diff against THIS fire, whatever this fire did.
-    /// 3. Local summary ONLY for `newlyPending` AND ``notificationsEnabled``.
+    /// 3. Local notification ONLY for `newlyPending` AND
+    ///    ``notificationsEnabled`` — actionable when the pure planner says
+    ///    the fire names exactly one stageable app, the EXISTING passive
+    ///    summary otherwise (shape unchanged from the 2026-10-26 policy).
+    ///
+    /// Rows come from the fire's OWN evaluation (never from `list.rows`), so
+    /// a manual refresh racing a scheduled fire can never bleed into this
+    /// decision — the same honesty rule the pre-planner pipeline had.
     ///
     /// wasCatchUp is passed nil on honest purpose: the engine records the
     /// fire's catch-up identity into ScheduleState AFTER the fire returns,
@@ -506,11 +532,13 @@ final class AppState: ObservableObject {
     /// `error` is nil at every posting site: this runs on the success path
     /// only (documented in NotificationNames).
     private func recordScheduledFireOutcome(
-        appsChecked: Int, pendingNames: [String]
+        appsChecked: Int, evaluatedRows: [AppRow]
     ) async {
+        let pending = evaluatedRows.filter { $0.updateAvailable }
+        let names = pending.map { $0.app.name }
         let userInfo = NotificationNames.scheduledFireUserInfo(
             appsChecked: appsChecked,
-            pendingCount: pendingNames.count,
+            pendingCount: names.count,
             wasCatchUp: nil,
             error: nil)
         DistributedNotificationCenter.default().postNotificationName(
@@ -521,18 +549,31 @@ final class AppState: ObservableObject {
 
         let advice = NotificationDecider.advise(
             previousScheduledPending: lastScheduledPendingNames,
-            currentPending: pendingNames)
-        lastScheduledPendingNames = pendingNames
+            currentPending: names)
+        lastScheduledPendingNames = names
 
         guard case .newlyPending(let newNames) = advice,
               notificationsEnabled
         else { return }
-        await postScheduledFireSummaryNotification(newNames: newNames)
+        // Stageability mirrors the window's own Stage-button visibility
+        // (`!isMacAppStore`): the notification offers exactly what the
+        // existing consent boundary would honor. The DECISION stays pure —
+        // the planner owns every actionable-vs-passive rule.
+        let candidates = pending.map { row in
+            NotificationActionPlanner.PendingCandidate(
+                appName: row.app.name,
+                bundleID: row.app.bundleIdentifier,
+                stageable: !row.app.isMacAppStore)
+        }
+        await postScheduledFireNotification(
+            plan: NotificationActionPlanner.plan(
+                newlyPendingNames: newNames, candidates: candidates))
     }
 
-    /// The local ONE-per-fire summary. Ask-per-fire keeps the flow boring
-    /// and the honesty surface single-purpose: every outcome lands verbatim
-    /// in ``notificationsState`` (denial is NOT success — no fake green).
+    /// Shapes and posts ONE local notification for this fire. The passive
+    /// branch is byte-identical to the pre-actionable summary (same title,
+    /// same body, no category, no payload) — the actionable shape EXTENDS,
+    /// never replaces.
     ///
     /// IDENTIFIER CHOICE (decided, 2026-10-26): a per-fire UUID. A
     /// deterministic id (hash of the name set) was considered for System
@@ -541,7 +582,34 @@ final class AppState: ObservableObject {
     /// behavior. Consequence, stated honestly: identical repeat updates
     /// across fires are NOT collapsed by an identifier we control; macOS
     /// applies its own coalescing we do not guarantee.
-    private func postScheduledFireSummaryNotification(newNames: [String]) async {
+    private func postScheduledFireNotification(
+        plan: NotificationActionPlanner.Plan
+    ) async {
+        let content = UNMutableNotificationContent()
+        switch plan {
+        case .actionableSingleApp(let name, let bundleID):
+            content.title = "Update available: \(name)"
+            content.body =
+                "AppUpdater found a newer version of \(name) — nothing installs by itself."
+            content.categoryIdentifier = NotificationActionIDs.categoryPendingUpdate
+            content.userInfo = NotificationActionIDs.pendingUpdateUserInfo(
+                appName: name, bundleID: bundleID)
+        case .passiveSummary(let names):
+            // The decider never yields empty news; this guard is the
+            // planner's total-function defense — post nothing rather than a
+            // fake summary.
+            guard !names.isEmpty else { return }
+            content.title = "AppUpdater: \(names.count) app updates available"
+            content.body = summaryBody(for: names)
+        }
+        await postLocalNotification(content: content)
+    }
+
+    /// The shared authorization + posting path for every local notification
+    /// (summary or actionable). Ask-per-fire keeps the flow boring and the
+    /// honesty surface single-purpose: every outcome lands verbatim in
+    /// ``notificationsState`` (denial is NOT success — no fake green).
+    private func postLocalNotification(content: UNMutableNotificationContent) async {
         let center = UNUserNotificationCenter.current()
         let granted: Bool
         do {
@@ -555,9 +623,6 @@ final class AppState: ObservableObject {
                 "macOS denied notification permission — enable it in System Settings"
             return
         }
-        let content = UNMutableNotificationContent()
-        content.title = "AppUpdater: \(newNames.count) app updates available"
-        content.body = summaryBody(for: newNames)
         do {
             try await center.add(
                 UNNotificationRequest(
@@ -567,6 +632,77 @@ final class AppState: ObservableObject {
             notificationsState = nil
         } catch {
             notificationsState = "notification posting failed — \(error)"
+        }
+    }
+
+    /// Registers the frozen actionable category and installs the response
+    /// delegate. Registration is idempotent and done ONCE at launch (before
+    /// any fire can post); the delegate is kept alive by
+    /// ``notificationDelegate`` (UNUserNotificationCenter holds it weakly).
+    private func installNotificationActionSupport() {
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(
+                identifier: NotificationActionIDs.categoryPendingUpdate,
+                actions: [
+                    UNNotificationAction(
+                        identifier: NotificationActionIDs.actionOpen,
+                        title: "Open AppUpdater",
+                        options: [.foreground]),
+                    UNNotificationAction(
+                        identifier: NotificationActionIDs.actionStageInstall,
+                        title: "Stage Install Command",
+                        options: []),
+                ],
+                intentIdentifiers: [],
+                options: []),
+        ])
+        let delegate = NotificationResponseDelegate { [weak self] outcome in
+            self?.handleNotificationAction(outcome)
+        }
+        notificationDelegate = delegate
+        UNUserNotificationCenter.current().delegate = delegate
+    }
+
+    /// Executes a notification response's outcome on the MainActor. Every
+    /// branch routes through the EXISTING consent boundary — nothing here
+    /// downloads, installs, or executes anything:
+    /// - `.openMainWindow` → ``openMainWindowFromNotification``.
+    /// - `.stageInstall` → ``requestInstall`` ONLY when the app is still in
+    ///   the current rows; a vanished row is surfaced through
+    ///   ``actionError`` (never a silent no-op, never a fabricated success).
+    /// - `.ignored` → executes nothing (unknown/dismissed responses).
+    private func handleNotificationAction(
+        _ outcome: NotificationActionRouter.Outcome
+    ) {
+        switch outcome {
+        case .openMainWindow:
+            openMainWindowFromNotification()
+        case .stageInstall(let bundleID, let appName):
+            if list.rows.contains(where: { $0.app.bundleIdentifier == bundleID }) {
+                requestInstall(bundleID: bundleID)
+            } else {
+                actionError =
+                    "Stage Install for \(appName): it is no longer in the current list — run a check and stage it from the window."
+            }
+        case .ignored:
+            break
+        }
+    }
+
+    /// The notification actions' window opening. ``mainWindowOpener`` (the
+    /// SwiftUI seam) wins when wired; otherwise the AppKit fallback brings
+    /// the EXISTING main window forward (the scene presents it at launch —
+    /// the normal case). Honest limitation: neither path can recreate a
+    /// window the user closed, because `openWindow(id:)` lives in view
+    /// context only — see ``mainWindowOpener``'s doc.
+    func openMainWindowFromNotification() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let opener = mainWindowOpener {
+            opener()
+            return
+        }
+        if let window = NSApp.windows.first(where: { $0.title == "AppUpdater" }) {
+            window.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -690,5 +826,56 @@ final class AppState: ObservableObject {
         if let row = list.rows.first(where: { $0.app.bundleIdentifier == bundleID }) {
             list.select(row.id)
         }
+    }
+}
+
+/// UNUserNotificationCenterDelegate for the app's local notifications.
+/// Deliberately decision-free: it translates UN types to plain strings,
+/// consults the pure core router (`NotificationActionRouter` — unit-proven
+/// without ever spinning a real center), and executes the outcome on the
+/// MainActor through AppState's handler. Lives in this file because the
+/// app-target surface is this lane's owned set; keeping the class here also
+/// keeps the delegate's wiring (`installNotificationActionSupport`) and its
+/// single consumer side by side.
+final class NotificationResponseDelegate:
+    NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+
+    private let handler: @MainActor (NotificationActionRouter.Outcome) -> Void
+
+    init(handler: @escaping @MainActor (NotificationActionRouter.Outcome) -> Void) {
+        self.handler = handler
+    }
+
+    /// Action button presses AND body taps (the default action). The routing
+    /// DECISION is the pure router's (synchronous, no shared state); only
+    /// the EXECUTION hops to the MainActor. The completion handler is called
+    /// synchronously on the delegate callback thread — it is a non-Sendable
+    /// function value this SDK refuses to send across isolation, and the
+    /// response IS handled at that point (classified + dispatched; the
+    /// handler itself is fast, non-blocking work on the main queue).
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let outcome = NotificationActionRouter.route(
+            actionIdentifier: response.actionIdentifier,
+            userInfo: response.notification.request.content.userInfo)
+        Task { @MainActor in
+            self.handler(outcome)
+        }
+        completionHandler()
+    }
+
+    /// Banner presentation even while the app is frontmost — this PRESERVES
+    /// the pre-delegate behavior (no delegate meant the system default
+    /// presentation); returning an empty set here would have narrowed it,
+    /// so it doesn't.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner])
     }
 }
