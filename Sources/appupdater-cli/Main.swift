@@ -31,8 +31,10 @@ USAGE:
   appupdater-cli check   [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
   appupdater-cli install [--apps NAME] --out FILE [--apply] [--relaunch]
 
-scan   : enumerate installed apps (no network).
-check  : scan + live source lookups (cask > sparkle > mas precedence).
+scan   : enumerate installed apps (no network). Default roots are
+         /Applications plus your custom scan locations (unless --dir given).
+check  : scan + live source lookups (cask > sparkle > mas > github; electron
+         claims only when nothing stronger exists — locked precedence).
 install: dry-run install PLAN per --apps (one app for --apply; refusals are
          honest: exit 3, nothing touched). --apply executes the plan for real
          with receipts; exit 0 = applied, 1 = aborted (see outcome.abortedStep),
@@ -91,8 +93,25 @@ struct CliMain {
             index += 1
         }
 
+        let appSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/AppUpdater", isDirectory: true)
+
+        // Default scan roots: /Applications ALWAYS, extended by the custom
+        // scan-location store (the same store the app reads — gap #18), but
+        // ONLY when the caller gave no explicit --dir set: an explicit
+        // override must stay exactly what the operator typed. A failed store
+        // read is a loud stderr warning + /Applications-only continue.
         if dirs.isEmpty {
             dirs = [URL(fileURLWithPath: "/Applications", isDirectory: true)]
+            do {
+                for root in try ScanLocationStore(directory: appSupport).resolvedRoots() {
+                    if let url = root.url {
+                        dirs.append(url)
+                    }
+                }
+            } catch {
+                errLine("warning: custom scan locations unreadable (\(error)) — scanning /Applications only\n")
+            }
         }
 
         if mode == "install" {
@@ -117,7 +136,28 @@ struct CliMain {
                 return
             }
 
-            let engine = UpdateCheckEngine(sources: [CaskSource(), SparkleSource(), MASSource()])
+            // Source roster — the same locked-precedence policy the app uses:
+            // whole-index cask (ETag-cached, alias-free matching) with an
+            // honest fallback to the per-token pipeline; Sparkle; MAS;
+            // GitHub (bounded sparkle-feed harvest); Electron (unknown lane,
+            // oracle-gated strictly-newer-only).
+            let caskIndex = CaskIndexStore(directory: appSupport)
+            var sources: [any UpdateSource] = []
+            let revalidated = await caskIndex.ensureLoaded()
+            var indexUsable = revalidated
+            if !indexUsable {
+                indexUsable = await caskIndex.isLoaded
+            }
+            if indexUsable {
+                sources.append(CaskIndexSource(store: caskIndex))
+            } else {
+                sources.append(CaskSource())
+            }
+            sources.append(SparkleSource())
+            sources.append(MASSource())
+            sources.append(GithubSource(directory: appSupport, session: .shared))
+            sources.append(ElectronSource())
+            let engine = UpdateCheckEngine(sources: sources)
             let checks = await engine.checkAll(apps: apps)
 
             if mode == "check" {
@@ -159,8 +199,6 @@ struct CliMain {
                 }
 
                 let fm = FileManager.default
-                let appSupport = fm.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/AppUpdater", isDirectory: true)
                 let stagingRoot = appSupport.appendingPathComponent("staging", isDirectory: true)
                 let backupsRoot = appSupport.appendingPathComponent("backups", isDirectory: true)
                 try? fm.createDirectory(at: stagingRoot, withIntermediateDirectories: true)

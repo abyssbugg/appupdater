@@ -34,6 +34,11 @@ import AppUpdaterCore
 /// - Schedule.json persistence is real (ScheduleFileStore): every engine
 ///   snapshot lands on disk; the UI's schedule lines always reflect the
 ///   last snapshot the engine emitted.
+/// - Gap-sprint boundaries (2026-10-27): FS events trigger INVENTORY
+///   re-scans ONLY — never source checks, notifications, or installs;
+///   custom scan locations ADD to /Applications (never replace it); the
+///   whole-index cask cache degrades honestly to the per-token pipeline;
+///   the scheduled engine stream stays the ONLY automatic check path.
 @MainActor
 final class AppState: ObservableObject {
 
@@ -104,6 +109,10 @@ final class AppState: ObservableObject {
     /// no-silent-failure contract.
     @Published private(set) var actionError: String?
 
+    /// Verbatim failure of a custom scan-location store read (nil = healthy).
+    /// Set only by the scan-root builder; cleared again on a healthy read.
+    @Published private(set) var scanLocationsError: String?
+
     /// The exact owner-run command staged by the last Install Now press
     /// (nil until then). Shown verbatim in the window — the app itself
     /// never runs it.
@@ -140,6 +149,28 @@ final class AppState: ObservableObject {
     private let scanDirectories: [URL]
     private let seams: SeamRouter
 
+    // MARK: Gap-sprint stores (2026-10-27)
+
+    /// Shared Application-Support home of the disk-backed stores (whole-index
+    /// cask cache + custom scan locations). Tests inject an isolated dir.
+    private let appSupportDirectory: URL
+
+    /// Custom scan-location store (gap #18). /Applications is ALWAYS scanned;
+    /// these directories add to it. AppState only READS it — the settings
+    /// sheet mutates through its own view (which owns the NSOpenPanel).
+    let scanLocationStore: ScanLocationStore
+
+    /// Whole-index cask store (gap #1): one ETag-cached `cask.json` +
+    /// alias-free artifact matching. `ensureLoaded` runs exactly once per
+    /// check pass (the store's contract); an unusable index degrades to the
+    /// proven per-token pipeline.
+    private let caskIndexStore: CaskIndexStore
+
+    /// The real Application-Support home (the CLI uses the same path).
+    private static let defaultAppSupportDirectory = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/AppUpdater", isDirectory: true)
+
     // MARK: Private bookkeeping
 
     /// The authoritative last pipeline outputs; every re-evaluation (rule
@@ -148,6 +179,12 @@ final class AppState: ObservableObject {
     private var lastChecks: [UpdateCheck] = []
     private var engineTask: Task<Void, Never>?
 
+    /// The FS-event monitor consumer task (inventory-refresh scope only).
+    private var fsMonitorTask: Task<Void, Never>?
+    /// The CURRENT monitor instance; a fresh one is created on every (re)start
+    /// because a monitor retires once its event stream has been consumed.
+    private var fileSystemMonitor = FileSystemMonitor()
+
     /// The pending NAME set recorded by the previous SCHEDULED fire
     /// (nil = never ran since launch) — the decider's baseline. MANUAL
     /// Check Now never mutates this (same exclusivity as ScheduleState:
@@ -155,14 +192,23 @@ final class AppState: ObservableObject {
     /// decides whether this fire is worth a local notification.
     private var lastScheduledPendingNames: [String]? = nil
 
+    /// - Parameters:
+    ///   - appSupportDirectory: shared home of the disk-backed stores; the
+    ///     default is the real ~/Library/Application Support/AppUpdater and
+    ///     tests inject an isolated directory instead.
     init(
         rulesDirectory: URL? = nil,
         scheduleDirectory: URL? = nil,
+        appSupportDirectory: URL? = nil,
         scanDirectories: [URL] = [URL(fileURLWithPath: "/Applications")]
     ) {
+        let support = appSupportDirectory ?? Self.defaultAppSupportDirectory
+        self.appSupportDirectory = support
         self.rules = RuleStore(directory: rulesDirectory)
         self.scheduleStore = ScheduleFileStore(directory: scheduleDirectory)
         self.scanDirectories = scanDirectories
+        self.scanLocationStore = ScanLocationStore(directory: support)
+        self.caskIndexStore = CaskIndexStore(directory: support)
 
         // The router exists before ANY closure (and before `list`) is
         // created, so closures never capture a partially-built AppState.
@@ -173,10 +219,12 @@ final class AppState: ObservableObject {
         // Final init statements: self is fully initialized from here on.
         router.owner = self
         startScheduler()
+        startFileSystemMonitor()
     }
 
     deinit {
         engineTask?.cancel()
+        fsMonitorTask?.cancel()
     }
 
     // MARK: Derived surfaces for the two views
@@ -294,12 +342,12 @@ final class AppState: ObservableObject {
     /// MANUAL path note (LOCKED): `pipelineRows()` (Check Now) posts nothing
     /// and touches ``lastScheduledPendingNames`` — scheduled fires only.
     func scheduledFire(_ ids: [String]?) async throws -> Int {
-        let apps = try await ProductionAppScanner().scan(directoryURLs: scanDirectories)
+        let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
         if let ids {
             let wanted = Set(ids)
             let targets = apps.filter { wanted.contains($0.bundleIdentifier) }
             let checks = await UpdateCheckEngine(
-                sources: [CaskSource(), SparkleSource(), MASSource()]
+                sources: await checkSources()
             ).checkAll(apps: targets)
             lastApps = apps
             lastChecks = checks
@@ -316,6 +364,105 @@ final class AppState: ObservableObject {
         await recordScheduledFireOutcome(
             appsChecked: apps.count, pendingNames: pendingNames(in: evaluated))
         return apps.count
+    }
+
+    // MARK: Gap-sprint wiring (scan roots, source roster, FS monitor)
+
+    /// The scan roots for this pass: the base roots (default /Applications)
+    /// PLUS every resolvable custom location (gap #18). /Applications is
+    /// always first (the store refuses to duplicate it); vanished custom
+    /// directories are skipped (they stay listed in the settings sheet with
+    /// their honest missing-dot); a failed store read never silently drops
+    /// locations — it surfaces verbatim in ``scanLocationsError`` and the
+    /// scan proceeds on the base roots alone.
+    private func effectiveScanDirectories() -> [URL] {
+        var roots = scanDirectories
+        do {
+            for resolved in try scanLocationStore.resolvedRoots() {
+                if let url = resolved.url {
+                    roots.append(url)
+                }
+            }
+            scanLocationsError = nil
+        } catch {
+            scanLocationsError = "custom scan locations unreadable — \(error)"
+        }
+        return roots
+    }
+
+    /// Source roster for ONE check pass — the engine sorts them into the
+    /// locked precedence (cask > sparkle > mas > github; unknown last):
+    /// - **Cask**: whole-index mode (ETag-cached `cask.json`, alias-free
+    ///   artifact matching — gap #1). `ensureLoaded` runs exactly once per
+    ///   pass; when the index cannot be revalidated AND holds no usable
+    ///   records, the check degrades honestly to the proven per-token
+    ///   pipeline (`CaskSource`) — never to a guess.
+    /// - **Sparkle / MAS** as before.
+    /// - **GitHub** (gap #3): bounded harvest from the app's own
+    ///   `sparkleFeedURL` only (zero extra lookups for other apps).
+    /// - **Electron** (gap #4): unknown-lane — its claims surface only when
+    ///   no stronger source produced one, and (post-amendment) only when
+    ///   strictly newer than the installed version.
+    private func checkSources() async -> [any UpdateSource] {
+        var sources: [any UpdateSource] = []
+        let revalidated = await caskIndexStore.ensureLoaded()
+        var indexUsable = revalidated
+        if !indexUsable {
+            indexUsable = await caskIndexStore.isLoaded
+        }
+        if indexUsable {
+            sources.append(CaskIndexSource(store: caskIndexStore))
+        } else {
+            sources.append(CaskSource())
+        }
+        sources.append(SparkleSource())
+        sources.append(MASSource())
+        sources.append(GithubSource(directory: appSupportDirectory, session: .shared))
+        sources.append(ElectronSource())
+        return sources
+    }
+
+    /// FS-event monitor (gap #17). SCOPE GUARD (LOCKED, restated): an FS
+    /// event may trigger an INVENTORY re-scan only — never source checks,
+    /// never notifications, never any install. One draining consumer per
+    /// monitor instance; roots are the effective scan roots at (re)start.
+    private func startFileSystemMonitor() {
+        fsMonitorTask?.cancel()
+        let monitor = FileSystemMonitor()
+        fileSystemMonitor = monitor
+        let roots = effectiveScanDirectories().map { $0.path }
+        fsMonitorTask = Task { [weak self] in
+            await monitor.start(rootPaths: roots)
+            for await _ in monitor.events {
+                guard let self, !Task.isCancelled else { break }
+                await self.refreshInventoryOnly()
+            }
+        }
+    }
+
+    /// The location sheet's change seam: re-armed monitor + inventory refresh
+    /// over the CURRENT store contents. Scan-only, per the scope guard.
+    func scanLocationsDidChange() async {
+        startFileSystemMonitor()
+        await refreshInventoryOnly()
+    }
+
+    /// FS-EVENT / location-change refresh — the locked scan-only shape:
+    /// inventory re-scan + rule re-evaluation with EMPTY checks (the same
+    /// shape the scheduled engine uses for a fire with no opted-in apps),
+    /// rows republished. NEVER: source lookups, notifications, schedule
+    /// state, installs. A vanished app leaves the list; a self-updated app's
+    /// stale "update available" badge clears until its next real check.
+    func refreshInventoryOnly() async {
+        do {
+            let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
+            lastApps = apps
+            lastChecks = []
+            let evaluated = await rules.evaluate(apps: apps, checks: [])
+            await list.setRows(evaluated)
+        } catch {
+            actionError = "rescan after a folder change failed — \(error)"
+        }
     }
 
     // MARK: Scheduled-fire notification side-effects (both branches)
@@ -437,9 +584,9 @@ final class AppState: ObservableObject {
     /// notification decider — a manual nudge must never fake a schedule
     /// event or tune the scheduled-fire baseline.
     func pipelineRows() async throws -> [AppRow] {
-        let apps = try await ProductionAppScanner().scan(directoryURLs: scanDirectories)
+        let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
         let checks = await UpdateCheckEngine(
-            sources: [CaskSource(), SparkleSource(), MASSource()]
+            sources: await checkSources()
         ).checkAll(apps: apps)
         lastApps = apps
         lastChecks = checks
@@ -455,7 +602,7 @@ final class AppState: ObservableObject {
         // First-ever rule press before any scan ran: populate the inventory
         // so the returned rows are real rows, not an empty artifact.
         if lastApps.isEmpty {
-            lastApps = try await ProductionAppScanner().scan(directoryURLs: scanDirectories)
+            lastApps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
         }
         switch kind {
         case .ignoreBundle:

@@ -84,6 +84,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var appState: AppState
 
     @State private var showSettingsSheet = false
+    @State private var showLocationsSheet = false
     @State private var errorDismissed = false
     @State private var isRefreshing = false
 
@@ -113,6 +114,10 @@ struct MainWindowView: View {
         .toolbar { toolbarContent }
         .sheet(isPresented: $showSettingsSheet) {
             ScheduleSettingsView(onClose: { showSettingsSheet = false })
+        }
+        .sheet(isPresented: $showLocationsSheet) {
+            LocationSettingsHost()
+                .frame(minWidth: 460, minHeight: 340)
         }
         .onChange(of: list.lastError) { _, _ in errorDismissed = false }
         .onAppear {
@@ -173,6 +178,13 @@ struct MainWindowView: View {
                 Image(systemName: "gearshape")
             }
             .help("Schedule & notifications")
+
+            Button {
+                showLocationsSheet = true
+            } label: {
+                Image(systemName: "folder.badge.plus")
+            }
+            .help("Custom scan locations")
         }
     }
 
@@ -401,6 +413,25 @@ struct MainWindowView: View {
 }
 
 // MARK: - List row
+
+/// Host wrapper so LocationSettingsView's settable `onChange` seam (a plain
+/// var — not a chaining modifier) reaches AppState's scan-only refresh
+/// without editing the lane-owned view file.
+private struct LocationSettingsHost: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var pane: LocationSettingsView {
+        var view = LocationSettingsView(store: appState.scanLocationStore)
+        view.onChange = {
+            Task { await appState.scanLocationsDidChange() }
+        }
+        return view
+    }
+
+    var body: some View {
+        pane
+    }
+}
 
 struct AppRowView: View {
     let row: AppRow
