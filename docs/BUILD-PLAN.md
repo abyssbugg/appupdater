@@ -146,6 +146,38 @@ password-less installs; FDA/MDM notes like the data model. Owner-directed lane: 
 in a worktree concurrently with earlier phases while core lanes progress; considered part of the
 product only after its review gate.
 
+## Phase 8 addendum — Tier-2 gap sprint — ✅ DONE (2026-10-28, 5 lanes, gates proven)
+
+Lane results (each gate-verified in its worktree before merge; union gate on main after every merge):
+- **notify-actions** `83e8124`→merge `4507c4a`: actionable pending-update notifications (pure
+  NotificationActionPlanner + router; exactly-one-stageable-app fires; Open/Stage routes honor the
+  consent boundary; passive summary preserved). 23 tests/3 suites.
+- **delta-backup** `202c0d1`→merge `611372d`: SparkleDelta parsing verified against the pinned
+  Sparkle 2.10.1 checkout; additive `UpdateInfo.sparkleDeltas` (legacy JSON decode-tolerant);
+  TM-aware backup (seam probe, exclusion xattr best-effort, never fails). 9 tests. Coordinator
+  wired the TM note into the .backup receipt.
+- **feedderive** `62f5c6f`→merge + engine wiring `c94afc4`: SparkleFeedDerivation (AppCenter UUID
+  from framework/host bytes [C], DevMateKit [C], HockeySDK [U-labeled]; 64 MB read cap; strict
+  shape rules) + `UpdateCheckEngine.feedDerivation` seam (derive-only-when-no-declared-feed,
+  cap 3, provenance annotation, nil-seam legacy-identical). 16 lane tests + 4 engine tests.
+  App + CLI sites wired.
+- **sched-depth** `c2dc933`→merge `e9ef369`: deferWhenOffline (+ isOnline seam, unreadable→online)
+  + quiet-hours active window (half-open, invalid→no-restriction, clamped normalizes), additive
+  Codable, ×3 stability runs. 12 tests.
+- **brew-adopt** `6c782a6`→merge `7cb1970`: MASAdoptGate refusal matrix (R1–R5, force discipline on
+  R4/R5) + unconditional paid-MAS warning; owner-run `brew install --cask --adopt [--force]`
+  STAGED (never executed); CLI --adopt/--force. 25 tests/2 suites. Live: adopt dry-run on AdGuard
+  → honest `not-mac-app-store`.
+
+Incident (recorded honestly): two brew-adopt dispatches raced one worktree (coordinator
+double-dispatch when a completion notification was miscounted as a freed slot). Outcome: the second
+agent audited the first's uncommitted work against the codebase, amended two real bugs (empty-token
+command synthesis → honest refusal; adapter load-contract docs), and the committed bytes are
+md5-identical to its double-verified gate runs. Lesson banked: `git status` a lane immediately
+before re-dispatch AND verify no prior dispatch of the same lane is still alive.
+
+Union end-state: **446 tests / 34 suites, swiftlint 0 errors.** Evidence: `docs/evidence/tier2-*.json`.
+
 ## Phase 8 — Competitor gap closure (GAP-ANALYSIS Tier 1) — ✅ DONE 2026-10-27
 Gate: 352 tests / 27 suites + swiftlint 0 errors in main after EVERY merge; live-network
 evidence per gap in `docs/evidence/gap-sprint-2026-10-27.txt`. Method: six lane worktrees +

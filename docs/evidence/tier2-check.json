@@ -1,0 +1,148 @@
+{
+  "apps" : [
+    {
+      "app" : {
+        "bundleIdentifier" : "com.adguard.mac.adguard",
+        "bundleVersion" : "2632",
+        "isMacAppStore" : false,
+        "minimumSystemVersion" : "13",
+        "name" : "AdGuard",
+        "path" : "\/Applications\/Adguard.app",
+        "shortVersion" : "2.21 Nightly 1",
+        "sparkleFeedURL" : "https:\/\/static.adtidy.org\/mac\/nightly\/adguard-nightly-appcast.xml"
+      },
+      "candidates" : [
+
+      ],
+      "failures" : [
+
+      ],
+      "verdict" : "unknown"
+    },
+    {
+      "app" : {
+        "bundleIdentifier" : "com.google.Chrome",
+        "bundleVersion" : "8078.74",
+        "isMacAppStore" : false,
+        "minimumSystemVersion" : "13.0",
+        "name" : "Chrome",
+        "path" : "\/Applications\/Google Chrome.app",
+        "shortVersion" : "156.0.8078.74"
+      },
+      "candidates" : [
+        {
+          "confidence" : "medium",
+          "downloadURL" : "https:\/\/dl.google.com\/chrome\/mac\/universal\/stable\/GGRO\/googlechrome.dmg",
+          "newestShortVersion" : "156.0.8078.74",
+          "releaseNotes" : "https:\/\/www.google.com\/chrome\/",
+          "sha256Hex" : "no_check",
+          "source" : "cask",
+          "sourceDetail" : "Homebrew cask whole-index; matched by artifact-name 'Google Chrome.app'; self-attested (sha256 lives in the same unsigned JSON)."
+        }
+      ],
+      "failures" : [
+
+      ],
+      "verdict" : "current"
+    },
+    {
+      "app" : {
+        "bundleIdentifier" : "com.mitchellh.ghostty",
+        "bundleVersion" : "18466",
+        "isMacAppStore" : false,
+        "minimumSystemVersion" : "13.0",
+        "name" : "Ghostty",
+        "path" : "\/Applications\/Ghostty.app",
+        "shortVersion" : "6ba144158"
+      },
+      "candidates" : [
+        {
+          "confidence" : "medium",
+          "downloadURL" : "https:\/\/release.files.ghostty.org\/1.4.0\/Ghostty.dmg",
+          "newestShortVersion" : "1.4.0",
+          "releaseNotes" : "https:\/\/ghostty.org\/",
+          "sha256Hex" : "3a02075dbd24318d778426af41dee5507d53ecc4578ede96912ec9ce6d18d3e8",
+          "source" : "cask",
+          "sourceDetail" : "Homebrew cask whole-index; matched by token 'ghostty'; self-attested (sha256 lives in the same unsigned JSON)."
+        }
+      ],
+      "failures" : [
+
+      ],
+      "resolved" : {
+        "confidence" : "medium",
+        "downloadURL" : "https:\/\/release.files.ghostty.org\/1.4.0\/Ghostty.dmg",
+        "newestShortVersion" : "1.4.0",
+        "releaseNotes" : "https:\/\/ghostty.org\/",
+        "sha256Hex" : "3a02075dbd24318d778426af41dee5507d53ecc4578ede96912ec9ce6d18d3e8",
+        "source" : "cask",
+        "sourceDetail" : "Homebrew cask whole-index; matched by token 'ghostty'; self-attested (sha256 lives in the same unsigned JSON)."
+      },
+      "verdict" : "update"
+    },
+    {
+      "app" : {
+        "bundleIdentifier" : "com.corecode.MacUpdater",
+        "bundleVersion" : "17599",
+        "isMacAppStore" : false,
+        "minimumSystemVersion" : "12.4",
+        "name" : "MacUpdater",
+        "path" : "\/Applications\/MacUpdater.app",
+        "shortVersion" : "3.5.0",
+        "sparkleFeedURL" : "https:\/\/www.corecode.io\/macupdater\/macupdater3.xml"
+      },
+      "candidates" : [
+        {
+          "confidence" : "medium",
+          "downloadURL" : "https:\/\/www.corecode.io\/downloads\/macupdater_3.5.0.dmg",
+          "newestShortVersion" : "3.5.0",
+          "releaseNotes" : "https:\/\/www.corecode.io\/macupdater\/index.html",
+          "sha256Hex" : "no_check",
+          "source" : "cask",
+          "sourceDetail" : "Homebrew cask whole-index; matched by token 'macupdater'; self-attested (sha256 lives in the same unsigned JSON)."
+        }
+      ],
+      "failures" : [
+
+      ],
+      "verdict" : "current"
+    },
+    {
+      "app" : {
+        "bundleIdentifier" : "com.macpaw.site.theunarchiver",
+        "bundleVersion" : "147",
+        "isMacAppStore" : false,
+        "minimumSystemVersion" : "10.13",
+        "name" : "The Unarchiver",
+        "path" : "\/Applications\/The Unarchiver.app",
+        "shortVersion" : "4.3.9"
+      },
+      "candidates" : [
+        {
+          "confidence" : "medium",
+          "downloadURL" : "https:\/\/dl.devmate.com\/com.macpaw.site.theunarchiver\/147\/1742287964\/TheUnarchiver-147.zip",
+          "newestShortVersion" : "4.3.9,147,1742287964",
+          "releaseNotes" : "https:\/\/theunarchiver.com\/",
+          "sha256Hex" : "d0d8dd2e028519ece5eeb0f018b3392f67e1c85053472ccbbaee64e87f173a28",
+          "source" : "cask",
+          "sourceDetail" : "Homebrew cask whole-index; matched by token 'the-unarchiver'; self-attested (sha256 lives in the same unsigned JSON)."
+        }
+      ],
+      "failures" : [
+
+      ],
+      "resolved" : {
+        "confidence" : "medium",
+        "downloadURL" : "https:\/\/dl.devmate.com\/com.macpaw.site.theunarchiver\/147\/1742287964\/TheUnarchiver-147.zip",
+        "newestShortVersion" : "4.3.9,147,1742287964",
+        "releaseNotes" : "https:\/\/theunarchiver.com\/",
+        "sha256Hex" : "d0d8dd2e028519ece5eeb0f018b3392f67e1c85053472ccbbaee64e87f173a28",
+        "source" : "cask",
+        "sourceDetail" : "Homebrew cask whole-index; matched by token 'the-unarchiver'; self-attested (sha256 lives in the same unsigned JSON)."
+      },
+      "verdict" : "update"
+    }
+  ],
+  "count" : 5,
+  "mode" : "check"
+}
