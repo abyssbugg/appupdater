@@ -145,3 +145,32 @@ Gate: threat-model review doc approved by owner BEFORE code; SMAppService daemon
 password-less installs; FDA/MDM notes like the data model. Owner-directed lane: may run
 in a worktree concurrently with earlier phases while core lanes progress; considered part of the
 product only after its review gate.
+
+## Phase 8 — Competitor gap closure (GAP-ANALYSIS Tier 1) — ✅ DONE 2026-10-27
+Gate: 352 tests / 27 suites + swiftlint 0 errors in main after EVERY merge; live-network
+evidence per gap in `docs/evidence/gap-sprint-2026-10-27.txt`. Method: six lane worktrees +
+subagents (sole file ownership), coordinator-owned shared-file glue, ff-merge after rebase.
+- **#1 Whole-index cask** (`2e2dec2`): ETag-cached `cask.json` (~19 MB, decode-before-persist,
+  stale-serve on network failure), alias-free artifact matching (token → artifact-name) retiring
+  the CaskAliases table; per-token pipeline survives as `CaskDocumentClient` fallback.
+- **#2 Manual per-app sources** (`1e53589` seam + `5381b7d` store/sheet + `52d9d9a` wiring):
+  github-repo or cask-token pins in `manual_sources.json`; MANUAL-OVER-BUILTIN (lock 11) via
+  the engine's `ManualSourceResolver`; SwiftUI sheet + toolbar pin button.
+- **#3 GitHub Releases source** (`ae7132e`): `/releases/latest` with body-verbatim ETag cache,
+  bounded harvest from the app's own `sparkleFeedURL` (github/raw hosts only), pinned-init for
+  manual pins, rate-limit honesty, asset pick dmg>zip / arm64-first, `<name>.sha256` sidecar.
+- **#4 Electron source** (`59f0438`): `app-update.yml` + read-only asar fallback; `.unknown`
+  lane oracle-gated strictly-newer-only (lock 12); SHA-512-only honesty clause in sourceDetail.
+- **#17 FSEvents inventory monitor** (`a25094a`): debounced scan-root monitor; scan-only scope
+  guard (lock 13); UseCFTypes deviation approved (brief's None+CFArray = proven live crash).
+- **#18 Custom scan locations** (`66a0399`): bookmark-backed `scan_locations.json`,
+  /Applications always scanned + customs added, settings pane, CLI parity (custom roots only
+  when no `--dir` given).
+- **Coordinator core**: VersionOracle unknown-branch strictly-greater amendment (`5d82814`);
+  UpdateCheckEngine `ManualSourceResolver` seam (`1e53589`); AppState/MainWindowView/CLI
+  integration (`818678d`, `52d9d9a`).
+- **Live proof**: real-binary probes cmux / Hex Fiend / Chrome / Notion / Capy / Linear / Orca /
+  Superset / GooeyPi / Traycer (update + current + gate + no-fall-through + harvest cases all
+  exercised); whole-index cache + weak-ETag verbatim on real disk. Deferred (honest): manual-pin
+  live e2e (no CLI pin verb — hermetic seam tests cover), network-volume bookmark live check.
+Tier 2 gaps remain queued; the two watch items stay deferred per owner directive.

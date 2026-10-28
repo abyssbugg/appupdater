@@ -5,7 +5,43 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
-## 2026-10-27 — v0.1.0 release closed out + notarization abandoned (owner directive) + release pipeline scripted
+## 2026-10-27 — Gap-closure sprint (Tier 1) SHIPPED: all six competitor gaps closed (waves 1+2)
+
+**Confirmed (gates + live evidence; full detail in `docs/evidence/gap-sprint-2026-10-27.txt`):**
+1. **Six lanes via worktrees + subagents, sole file ownership each, never pushed; every branch
+   rebased + ff-merged; full gate in main after EVERY merge:** github-source `ae7132e` (+28 tests,
+   Releases/latest + ETag body-verbatim cache + asset pick), electron-source `59f0438` (+23,
+   app-update.yml + read-only asar fallback), cask-index `2e2dec2` (+29, whole-index ETag store +
+   alias-free matching), custom-locations `66a0399` (+13, bookmark-backed scan-location store +
+   pane), fsevents `a25094a` (+9, debounced monitor, scan-only guard), manual-sources `5381b7d`
+   (+18, per-app github/cask pins + sheet). Coordinator-owned core: VersionOracle unknown-branch
+   strictly-greater amendment `5d82814` (+1); engine `ManualSourceResolver` seam `1e53589` (+4);
+   glue `818678d` + `52d9d9a` (AppState roster + custom roots + FS monitor + sheets + CLI parity).
+2. **Final gate: 352 tests / 27 suites passed, swiftlint errors 0** (was 227/20). Every lane proved
+   `git status --short` == owned files only; no lane touched Package.swift or shared files.
+3. **Live-network matrix through the real CLI binary** (10 apps): cmux (whole-index token match +
+   REAL github harvest manaflow-ai/cmux info-only + verbatim sparkle -1011 failure), Hex Fiend
+   (token + github DMG pick `Hex_Fiend_2.18.1.dmg`), Chrome (artifact-name 'Google Chrome.app'
+   — CaskAliases retirement proven), Notion (cask 7.41.1 > 7.41.0 ⇒ update over an equal electron
+   unknown), Capy + GooeyPi + Superset (equal unknown ⇒ current — amendment live), Linear (token
+   equal), Orca (STALE cask 1.3.1 vs installed 1.4.242 ⇒ nothing surfaced; fresher unknown NOT
+   substituted — no-fall-through live), **Traycer (unknown-only 1.5.1 > 1.4.2 ⇒ UPDATE — the
+   unknown lane's win case live)**.
+4. **Whole-index cache proven on real disk:** `~/Library/Application Support/AppUpdater/cask.json`
+   = 19,280,921 bytes + `cask.json.etag` `W/"6ae1705b-1263419"` (weak ETag verbatim) +
+   `github_etag_cache.json` 6,362 B.
+5. **New locks 11–13 recorded in AGENTS.md** (manual-over-builtin; electron stance; FS=scan-only).
+6. **Honest deferrals:** manual-pin live e2e (no CLI pin verb — the sheet is the owner action;
+   hermetic seam tests cover the engine path); network-volume bookmark live check (no volumes
+   mounted). Pre-existing flake flagged (NOT sprint-caused): `happyDmgApplyEndToEndNoLeftoverMounts`
+   once in 4 runs, hdiutil timing under parallel load, green on rerun, shared file untouched.
+   Lane deviations accepted: CaskIndexStore match API internal (CaskRecord visibility); FS
+   `kFSEventStreamCreateFlagUseCFTypes` (brief's None+CFArray combo = proven live crash).
+
+**Watch items unchanged (owner deferred):** v0.1.0-zip-predates-redesign awareness;
+`docs/reverse/` stays local-only/uncommitted.
+
+---
 
 **Confirmed (live evidence):**
 1. **Release closed out:** `appcast.xml` committed (`3244b29`) — item values re-derived from the SHIPPED artifact (signature re-verified exit 0; release asset downloaded and byte-compared to the signed build; Info.plist read from the downloaded zip). Feed verified LIVE (raw URL → HTTP 200). Both pushes green on CircleCI. Docs: RELEASE-PLUMBING §2b receipts + §2 warning that CFBundleVersion must advance (Sparkle compares build numbers — short-version-only bumps offer nothing).
