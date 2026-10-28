@@ -76,6 +76,14 @@ struct MenuBarView: View {
         }
         .padding(.vertical, 4)
         .frame(minWidth: 260)
+        .onAppear {
+            // Coordinator wiring for the notify-actions lane's opener seam:
+            // this surface appears at launch and owns a working openWindow
+            // closure, so the "Open AppUpdater" notification action can also
+            // RE-CREATE the main window after the user closed it (not just
+            // activate an existing one).
+            appState.mainWindowOpener = showMainWindow
+        }
     }
 
     // MARK: pieces
