@@ -52,6 +52,10 @@ public struct UpdateDownloader: Sendable {
     private static let streamChunkSize = 1_048_576 // 1 MiB
     /// Zip signature bytes — the sanity gate for .zip artifacts.
     private static let zipMagic = Data([0x50, 0x4B, 0x03, 0x04]) // "PK\x03\x04"
+    /// Flat packages (`.pkg`) are xar archives — leading magic "xar!".
+    /// (Bundle-style pkg payloads are still caught here; the command-staging
+    /// step additionally tells the owner exactly which file will be installed.)
+    private static let pkgMagic = Data([0x78, 0x61, 0x72, 0x21]) // "xar!"
 
     /// Streams `update`'s artifact into `dir` and verifies it. On success
     /// returns the staged file; on any verified failure the staging file is
@@ -65,7 +69,8 @@ public struct UpdateDownloader: Sendable {
     ///   5. non-2xx HTTP status (404…)   → URLError(.badServerResponse)    (file never created)
     ///   6. Content-Length ≠ received    → URLError(.badServerResponse)    (file removed)
     ///   7. digest mismatch              → InstallerError.sha256Mismatch   (file removed)
-    ///   8. zip NOT starting PK\x03\x04 → InstallerError.magicMismatch    (file removed)
+    ///   8. zip NOT starting PK\x03\x04 / pkg NOT starting "xar!"
+    ///                                 → InstallerError.magicMismatch   (file removed)
     public func downloadAndVerify(from update: UpdateInfo, into dir: URL) async throws -> DownloadedUpdate {
         guard let url = update.downloadURL else {
             throw InstallerError.unsupportedArtifact(reason: "missing download URL")
@@ -149,11 +154,16 @@ public struct UpdateDownloader: Sendable {
                 throw InstallerError.sha256Mismatch(expected: expectedHex, actual: actualHex)
             }
 
-            // Magic sanity gate — zips only. DMGs have no leading magic:
+            // Magic sanity gate — zips + pkgs. DMGs have no leading magic:
             // authenticity is confirmed at MOUNT time by the deploy lane
             // (honest boundary, not a gap the installer papers over).
-            if kind == .zip {
+            switch kind {
+            case .zip:
                 try Self.verifyZipMagic(at: stagedURL)
+            case .pkg:
+                try Self.verifyPKGMagic(at: stagedURL)
+            case .dmg:
+                break
             }
 
             return DownloadedUpdate(stagedURL: stagedURL, kind: kind, expectedSha256Hex: expectedHex)
@@ -167,8 +177,10 @@ public struct UpdateDownloader: Sendable {
     // MARK: - Mapping + static helpers (internal; test-visible via @testable)
 
     /// Artifact kind by file extension. v1 handles .dmg and .zip in user
-    /// space anything else (pkg/tbz/tgz/bin, or no extension at all) is an
-    /// honest hard error — pkg belongs to the privileged lane (Phase 7).
+    /// space; .pkg joined 2026-10-27 as the staged-owner-command kind
+    /// (download + verify + leave staged + print the sudo command — the
+    /// installer is never executed here). Anything else (tbz/tgz/bin, or no
+    /// extension at all) is an honest hard error.
     static func kindFromExtension(url: URL) throws -> InstallKind {
         let filename = url.lastPathComponent.lowercased()
         let ext: String
@@ -182,10 +194,14 @@ public struct UpdateDownloader: Sendable {
             return .dmg
         case "zip":
             return .zip
+        case "pkg":
+            return .pkg
         default:
             let shown = ext.isEmpty ? "none" : ext
             throw InstallerError.unsupportedArtifact(
-                reason: "file extension '\(shown)' — v1 installs .dmg and .zip in user space; pkg/tbz/tgz belong to the privileged path in a later phase"
+                reason: "file extension '\(shown)' — v1 installs .dmg and .zip in user space; "
+                    + ".pkg is staged for an owner-run `sudo installer` command; "
+                    + "tbz/tgz/bin are refused outright"
             )
         }
     }
@@ -208,6 +224,20 @@ public struct UpdateDownloader: Sendable {
         let head = try handle.read(upToCount: zipMagic.count) ?? Data()
         guard head.starts(with: zipMagic) else {
             throw InstallerError.magicMismatch(reason: "staged zip does not start with the PK\\x03\\x04 signature")
+        }
+    }
+
+    /// Pkg sanity check: a flat package is an xar archive and MUST start with
+    /// "xar!". Anything else is .magicMismatch — the staged file is removed by
+    /// the caller. (This is a byte check only; signature validation of the
+    /// pkg is `pkgutil --check-signature`, which is the OWNER's step — the
+    /// printed command can be reviewed before it is ever run.)
+    static func verifyPKGMagic(at stageURL: URL) throws {
+        let handle = try FileHandle(forReadingFrom: stageURL)
+        defer { try? handle.close() }
+        let head = try handle.read(upToCount: pkgMagic.count) ?? Data()
+        guard head.starts(with: pkgMagic) else {
+            throw InstallerError.magicMismatch(reason: "staged pkg does not start with the xar! signature")
         }
     }
 

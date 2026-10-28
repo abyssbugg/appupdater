@@ -338,6 +338,83 @@ extension InstallCoordinatorTests {
 extension InstallCoordinatorTests {
     // MARK: The gate tests
 
+    // MARK: STAGED-PKG v1 (2026-10-27) — download + verify + owner command, nothing more
+
+    /// Flat-package bytes: real xar! magic + padding (a byte check, not a
+    /// pkgutil validation — reviewing the staged file is the OWNER's step).
+    private func makeFakePKG(at url: URL) throws {
+        var bytes = Data("xar!".utf8)
+        bytes.append(Data(repeating: 0xAB, count: 96))
+        try bytes.write(to: url, options: [.atomic])
+    }
+
+    @Test func pkgApplyStagesVerifiedPKGAndOwnerCommandNeverExecutes() async throws {
+        let pkgURL = root.appendingPathComponent("victim-2.0.pkg")
+        try makeFakePKG(at: pkgURL)
+        try serve(pkgURL)
+
+        let seams = Seams(openerCalls: LockedBox<[URL]>([]), disposed: LockedBox<[URL]>([]))
+        let coordinator = coordinator(seams)
+        let plan = try planOf(artifact: pkgURL)
+        #expect(plan.kind == .pkg)
+        let outcome = await coordinator.run(
+            plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot, relaunchRequested: false)
+
+        // Green staging: exactly the four pkg steps, nothing else.
+        #expect(outcome.abortedStep == nil)
+        #expect(outcome.receipts.map { $0.step } == [
+            .download, .verifySha256, .verifyArtifactMagic, .stageOwnerCommand,
+        ])
+        // The REAL command names the actual staged path.
+        let command = try #require(outcome.stagedCommand)
+        #expect(command.hasPrefix("sudo installer -pkg \""))
+        #expect(command.hasSuffix("\" -target /"))
+        let stagedPath = String(command
+            .dropFirst("sudo installer -pkg \"".count)
+            .dropLast("\" -target /".count))
+        // ...and that path is PERSISTENT staging — the pkg SURVIVED the run
+        // (the per-apply workspace cleanup must never eat the owner's pkg).
+        #expect(stagedPath.contains("staged-pkg/"))
+        #expect(FileManager.default.fileExists(atPath: stagedPath))
+        // No swap machinery ran: no backup, no disposition, no opener, no retention.
+        #expect(outcome.backup == nil)
+        #expect(outcome.finalInstalledShortVersion == nil)
+        #expect(outcome.retentionNote == nil) // retentionKeep defaults to 3 — the pkg path never prunes
+        #expect(seams.disposed.with { $0.isEmpty })
+        #expect(seams.openerCalls.with { $0.isEmpty })
+    }
+
+    @Test func pkgWithWrongMagicAbortsBeforeAnyStagedCommand() async throws {
+        let pkgURL = root.appendingPathComponent("victim-2.0.pkg")
+        try Data(repeating: 0x00, count: 128).write(to: pkgURL, options: [.atomic])
+        try serve(pkgURL)
+
+        let seams = Seams(openerCalls: LockedBox<[URL]>([]), disposed: LockedBox<[URL]>([]))
+        let coordinator = coordinator(seams)
+        let plan = try planOf(artifact: pkgURL)
+        let outcome = await coordinator.run(
+            plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot, relaunchRequested: false)
+
+        // The downloader's OWN xar! byte check is the first line of defense and
+        // aborts the .download step (the coordinator's verifyArtifactMagic
+        // re-read is the independent second opinion for surviving bytes). The
+        // point this test pins: tampered pkg bytes → NOTHING is handed to the
+        // owner — no stageOwnerCommand receipt, no staged file, anywhere.
+        #expect(outcome.abortedStep == .download)
+        #expect(outcome.stagedCommand == nil)
+        #expect(outcome.receipts.last?.succeeded == false)
+        // The tampered bytes were removed by the downloader's own cleanup —
+        // every apply-* dir under staged-pkg is left empty, nothing staged.
+        let pkgRoot = stagingRoot.appendingPathComponent("staged-pkg")
+        let leftovers = (try? FileManager.default.contentsOfDirectory(
+            atPath: pkgRoot.path(percentEncoded: false))) ?? []
+        #expect(leftovers.allSatisfy { name in
+            let inner = (try? FileManager.default.contentsOfDirectory(
+                atPath: pkgRoot.appendingPathComponent(name).path(percentEncoded: false))) ?? ["x"]
+            return inner.isEmpty
+        })
+    }
+
     /// Full 9-step v1 → v2 apply on real disk: receipts green and in order,
     /// swapped bundle serves v2 under the SAME bundle id, backup verified by a
     /// byte-equal restore round-trip, old copy recorded into the test trash,

@@ -313,10 +313,12 @@ struct DownloadTests {
     // (5) Unsupported extension → unsupportedArtifact through the full
     // pipeline: the refusal happens in preflight, so NO network request is
     // made and nothing is staged. (The mapping table gets its own test below.)
+    // .pkg left this test 2026-10-27 (staged-PKG v1: it is downloaded +
+    // verified + staged, never executed) — .tbz is the stand-in refusal here.
     @Test func unsupportedExtensionRefusedWithoutNetwork() async throws {
         DLStubURLProtocol.reset()
         let dir = try makeStagingDir(named: "ext")
-        let pkgURL = URL(string: "https://updates.example.test/downloads/tool.pkg")!
+        let pkgURL = URL(string: "https://updates.example.test/downloads/tool.tbz")!
         let info = UpdateInfo(
             source: .github,
             newestShortVersion: "1.0.0",
@@ -326,13 +328,13 @@ struct DownloadTests {
 
         do {
             _ = try await makeDownloader().downloadAndVerify(from: info, into: dir)
-            Issue.record("expected unsupportedArtifact for .pkg")
+            Issue.record("expected unsupportedArtifact for .tbz")
         } catch let error as InstallerError {
             guard case .unsupportedArtifact(let reason) = error else {
                 Issue.record("wrong InstallerError case: \(error)")
                 return
             }
-            #expect(reason.contains("pkg"))
+            #expect(reason.contains("tbz"))
         } catch {
             Issue.record("wrong error domain: \(error)")
         }
@@ -342,13 +344,45 @@ struct DownloadTests {
         #expect(DLStubURLProtocol.recordedRequests.isEmpty)
     }
 
+    // (5b') STAGED-PKG v1: a .pkg flows through the SAME preflight + download +
+    // sha256 pipeline, and the xar! byte check passes for a real flat package.
+    // The download step returns kind .pkg; nothing here executes installer(8).
+    @Test func pkgDownloadsAndVerifiesXarMagic() async throws {
+        DLStubURLProtocol.reset()
+        let dir = try makeStagingDir(named: "pkg")
+        let url = URL(string: "https://updates.example.test/downloads/tool-2.0.pkg")!
+        var pkgFixture = Data("xar!".utf8)
+        pkgFixture.append(Data(repeating: 0xAB, count: 96))
+        let fixtureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appupdater-pkgfixture-\(UUID().uuidString).pkg")
+        try pkgFixture.write(to: fixtureURL, options: [.atomic])
+        defer { try? FileManager.default.removeItem(at: fixtureURL) }
+        let pkgSHA256 = try Checksum.sha256Hex(ofFile: fixtureURL)
+        DLStubURLProtocol.stub(pkgFixture, extraHeaders: ["Content-Length": String(pkgFixture.count)], for: url.absoluteString)
+        let info = UpdateInfo(
+            source: .github,
+            newestShortVersion: "2.0.0",
+            downloadURL: url,
+            sha256Hex: pkgSHA256
+        )
+
+        let downloaded = try await makeDownloader().downloadAndVerify(from: info, into: dir)
+        #expect(downloaded.kind == .pkg)
+        #expect(downloaded.stagedURL.lastPathComponent == "tool-2.0.pkg")
+        let files = try dirFiles(dir)
+        #expect(files == ["tool-2.0.pkg"])
+    }
+
     // (5b) The mapping table itself, no network involved.
     @Test func kindFromExtensionMapping() throws {
         #expect(try UpdateDownloader.kindFromExtension(url: URL(string: "https://x.test/downloads/App.dmg")!) == .dmg)
         #expect(try UpdateDownloader.kindFromExtension(url: URL(string: "https://x.test/downloads/Inner_archive.ZIP")!) == .zip)
         #expect(try UpdateDownloader.kindFromExtension(url: URL(string: "https://x.test/downloads/Firefox%20158.0.1.dmg")!) == .dmg)
+        // STAGED-PKG v1 (2026-10-27): .pkg maps to .pkg — download + verify +
+        // stage + owner command; installer(8) still never runs here.
+        #expect(try UpdateDownloader.kindFromExtension(url: URL(string: "https://x.test/downloads/Tool-2.0.pkg")!) == .pkg)
 
-        for bad in ["pkg", "tbz", "tgz", "bin", "tar.gz"] {
+        for bad in ["tbz", "tgz", "bin", "tar.gz"] {
             do {
                 let badURL = try #require(URL(string: "https://x.test/downloads/up.\(bad)"))
                 _ = try UpdateDownloader.kindFromExtension(url: badURL)

@@ -5,10 +5,16 @@ import Foundation
 // If a lane needs a change here: STOP and report it; shared files are coordinator-owned.
 
 /// What KIND of artifact an update is. v1 handles dmg + zip user-space.
-/// pkg/tbz/tgz are honest hard errors in v1 (pkg is the privileged lane's scope).
+/// AMENDMENT (2026-10-27, staged-PKG command): `pkg` joined as a THIRD kind —
+/// but its plan never mutates bundles: download → verify → leave the verified
+/// pkg in a persistent staging folder → stage the OWNER-RUN `sudo installer`
+/// command. `installer(8)` is never executed by AppUpdater (consent boundary;
+/// the resident privileged daemon stays parked per the Phase-7 review doc).
+/// pkg/tbz/tgz remain honest hard errors (tbz/tgz are still refused outright).
 public enum InstallKind: String, Codable, Hashable, Sendable {
     case dmg
     case zip
+    case pkg
 }
 
 /// One actionable step of an install plan. Order is the coordinator's fixed policy.
@@ -23,6 +29,11 @@ public enum InstallStep: String, Codable, Hashable, CaseIterable, Sendable {
     case relaunch
     /// Post-scan identity check (scanner re-run on the swapped bundle).
     case postScan
+    /// AMENDMENT (2026-10-27, staged-PKG command): terminal step of a pkg plan —
+    /// the verified pkg is LEFT on disk in persistent staging and the exact
+    /// owner-run `sudo installer -pkg <path> -target /` command is recorded
+    /// (receipt detail + `InstallOutcome.stagedCommand`). Nothing is executed.
+    case stageOwnerCommand
 }
 
 /// Path of one artifact staged for installation.
@@ -78,13 +89,19 @@ public struct InstallPlan: Codable, Hashable, Sendable {
     public var steps: [InstallStep]
     /// Human-consumable warnings (e.g. downgrade, missing sha256, non-https remediations).
     public var warnings: [String]
+    /// AMENDMENT (2026-10-27, staged-PKG command): pkg plans carry the command
+    /// TEMPLATE (placeholder `<staged-pkg-path>` — the real path exists only
+    /// after the verified download). dmg/zip plans stay nil. Additive optional:
+    /// synthesized decodeIfPresent keeps every previously written plan decodable.
+    public var stagedCommand: String?
 
-    public init(app: InstalledApp, update: UpdateInfo, kind: InstallKind, steps: [InstallStep], warnings: [String]) {
+    public init(app: InstalledApp, update: UpdateInfo, kind: InstallKind, steps: [InstallStep], warnings: [String], stagedCommand: String? = nil) {
         self.app = app
         self.update = update
         self.kind = kind
         self.steps = steps
         self.warnings = warnings
+        self.stagedCommand = stagedCommand
     }
 }
 
@@ -123,14 +140,24 @@ public struct InstallOutcome: Codable, Hashable, Sendable {
     /// "retention skipped: <reason>" when the prune itself failed. Hygiene only —
     /// never alters `success` semantics, receipts or exit codes.
     public var retentionNote: String?
+    // AMENDMENT RECORD: coordinator-owned frozen type, additive amendment
+    // 2026-10-27 (staged-PKG command), decode-tolerant for older JSON
+    // (optional field, synthesized decodeIfPresent — every previously written
+    // report still decodes).
+    /// STAGED-PKG v1: the REAL owner-run command (actual staged path) after a
+    /// green pkg apply — `sudo installer -pkg "<path>" -target /`. nil for
+    /// every dmg/zip apply and for any aborted run. The command is NEVER
+    /// executed by AppUpdater; the owner runs it (and deletes the staged pkg).
+    public var stagedCommand: String?
 
-    public init(plan: InstallPlan, receipts: [StepReceipt], abortedStep: InstallStep?, finalInstalledShortVersion: String?, backup: BackupReceipt?, retentionNote: String? = nil) {
+    public init(plan: InstallPlan, receipts: [StepReceipt], abortedStep: InstallStep?, finalInstalledShortVersion: String?, backup: BackupReceipt?, retentionNote: String? = nil, stagedCommand: String? = nil) {
         self.plan = plan
         self.receipts = receipts
         self.abortedStep = abortedStep
         self.finalInstalledShortVersion = finalInstalledShortVersion
         self.backup = backup
         self.retentionNote = retentionNote
+        self.stagedCommand = stagedCommand
     }
 }
 

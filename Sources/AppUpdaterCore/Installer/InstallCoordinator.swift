@@ -34,6 +34,12 @@
 //     install happened, but verification would not vouch for it; reports show
 //     both truths side by side.
 //   • Nothing here shells out to `sudo`; user-space only (project floor).
+//     STAGED-PKG v1 (2026-10-27): a pkg apply stays on the same floor — it
+//     downloads + verifies the pkg, leaves it in PERSISTENT staging (outside
+//     the per-apply workspace cleanup), and RECORDS the owner-run
+//     `sudo installer -pkg <path> -target /` command in the outcome
+//     (`stagedCommand`). The command is never executed; no backup, deploy,
+//     swap, relaunch, postScan or retention happens on a pkg path.
 //   • BACKUP RETENTION is hygiene, not a step: its outcome surfaces ONLY in
 //     `InstallOutcome.retentionNote` and can never add/remove receipts,
 //     change `abortedStep`, or downgrade a green apply.
@@ -154,12 +160,25 @@ public struct InstallCoordinator: Sendable {
         /// result (or its failure) is reported. See the decision record at the
         /// head of this file.
         var retentionNote: String?
+        /// STAGED-PKG v1: the real owner-run command after a green pkg staging
+        /// (nil for dmg/zip applies and aborted runs). See the pkg branch below.
+        var stagedCommand: String?
         let fm = FileManager.default
 
         let workspace = stagingRoot.appendingPathComponent(
             "apply-\(UUID().uuidString)", isDirectory: true)
-        let downloadDir = workspace.appendingPathComponent("download", isDirectory: true)
         let deployDir = workspace.appendingPathComponent("deploy", isDirectory: true)
+
+        // STAGED-PKG v1: a pkg apply downloads into a PERSISTENT staging folder
+        // (NOT the per-apply workspace) because the whole point is that the
+        // verified pkg SURVIVES the run for the owner to install later. The
+        // per-apply workspace is still created and cleaned as before — for pkg
+        // it just stays empty (no deploy ever happens).
+        let isPKGApply = plan.kind == .pkg
+        let pkgStagingDir = stagingRoot.appendingPathComponent("staged-pkg", isDirectory: true)
+        let downloadDir = isPKGApply
+            ? pkgStagingDir.appendingPathComponent("apply-\(UUID().uuidString)", isDirectory: true)
+            : workspace.appendingPathComponent("download", isDirectory: true)
 
         // Staging hygiene for every outcome — success or abort, the workspace
         // (download artifact + deploy leftovers) is best-effort removed. The
@@ -181,7 +200,7 @@ public struct InstallCoordinator: Sendable {
             InstallOutcome(
                 plan: plan, receipts: receipts, abortedStep: abortedStep,
                 finalInstalledShortVersion: finalInstalledVersion, backup: backupReceipt,
-                retentionNote: retentionNote)
+                retentionNote: retentionNote, stagedCommand: stagedCommand)
         }
 
         // MARK: .download — stream + hash-while-writing + SourceHash gate
@@ -216,7 +235,7 @@ public struct InstallCoordinator: Sendable {
             return done()
         }
 
-        // MARK: .verifyArtifactMagic — zip PK\x03\x04 re-read / dmg honesty
+        // MARK: .verifyArtifactMagic — zip PK\x03\x04 re-read / pkg xar! re-read / dmg honesty
         do {
             let startedAt = Date()
             switch downloaded.kind {
@@ -224,6 +243,10 @@ public struct InstallCoordinator: Sendable {
                 try UpdateDownloader.verifyZipMagic(at: downloaded.stagedURL)
                 receipt(.verifyArtifactMagic, startedAt: startedAt, succeeded: true,
                         detail: "zip magic PK\\x03\\x04 re-verified over the staged bytes")
+            case .pkg:
+                try UpdateDownloader.verifyPKGMagic(at: downloaded.stagedURL)
+                receipt(.verifyArtifactMagic, startedAt: startedAt, succeeded: true,
+                        detail: "pkg magic xar! re-verified over the staged bytes")
             case .dmg:
                 // No leading magic exists for UDIF; authenticity is confirmed by
                 // hdiutil attach succeeding in the deploy step (documented lane
@@ -233,6 +256,26 @@ public struct InstallCoordinator: Sendable {
             }
         } catch {
             abort(.verifyArtifactMagic, startedAt: Date(), error: error)
+            return done()
+        }
+
+        // MARK: STAGED-PKG v1 — the pkg branch TERMINATES here, by design.
+        // No backup (nothing is swapped), no quit, no deploy, no relaunch, no
+        // postScan, no retention (refusals-and-aborts never prune; a pkg staging
+        // is not a green user-space apply). The verified pkg REMAINS in
+        // persistent staging — deliberately outside the per-apply workspace
+        // cleanup above — and the exact owner-run command is recorded. Nothing
+        // is ever executed by AppUpdater: the floor "installs are the owner's
+        // explicit hand action" holds, now for pkg distributions too.
+        if downloaded.kind == .pkg {
+            let startedAt = Date()
+            let path = downloaded.stagedURL.path(percentEncoded: false)
+            let command = "sudo installer -pkg \"\(path)\" -target /"
+            stagedCommand = command
+            receipt(.stageOwnerCommand, startedAt: startedAt, succeeded: true,
+                    detail: "verified pkg left at \(path); NOTHING executes — owner runs: "
+                        + command + "  (the staged pkg stays on disk until you delete it; "
+                        + "review `pkgutil --check-signature \"\(path)\"` first if you want)")
             return done()
         }
 

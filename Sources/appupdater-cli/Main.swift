@@ -16,7 +16,11 @@ import AppUpdaterCore
 //       WITHOUT --apply this is a dry-run: pure data, nothing downloads or moves.
 //       WITH --apply the executor chain runs for real (download → independent
 //       sha256/magic verify → backup → graceful quit → deploy → atomic swap →
-//       postScan). Refusals (no claim / security floor) exit 3 before anything
+//       postScan). PKG distributions (staged-PKG v1): the chain stops after
+//       download → sha256 → xar-magic verify, leaves the verified pkg in
+//       persistent staging, and prints the owner-run
+//       `sudo installer -pkg <path> -target /` — installer(8) is NEVER executed
+//       here. Refusals (no claim / security floor) exit 3 before anything
 //       is touched; an aborted step exits 1 with the full receipt chain.
 //       Applying is strictly per-app (exactly one --apps match) and is the
 //       user's explicit action — the CLI never batches silently. --relaunch
@@ -38,9 +42,13 @@ check  : scan + live source lookups (cask > sparkle > mas > github; electron
          per-app manual pin (manual_sources.json) is consulted INSTEAD of
          every built-in source for that app (manual-over-builtin).
 install: dry-run install PLAN per --apps (one app for --apply; refusals are
-         honest: exit 3, nothing touched). --apply executes the plan for real
-         with receipts; exit 0 = applied, 1 = aborted (see outcome.abortedStep),
-         3 = plan refused (security floor / no claim), 2 = usage/target error.
+         honest: exit 3, nothing touched). dmg/zip --apply executes the plan
+         for real with receipts; .pkg --apply downloads + verifies the pkg
+         (same HTTPS + sha256 floor), leaves it STAGED, and prints the
+         owner-run `sudo installer` command — AppUpdater never runs
+         installer(8). Exit 0 = applied/staged, 1 = aborted (see
+         outcome.abortedStep), 3 = plan refused (security floor / no claim),
+         2 = usage/target error.
 --out FILE writes the JSON there instead of stdout (parent dir must exist).
 """
 
@@ -219,6 +227,18 @@ struct CliMain {
                     mode: "install-apply",
                     applied: outcome.abortedStep == nil,
                     outcome: outcome), outFile)
+
+                // STAGED-PKG v1: a green pkg staging ends with the owner-run
+                // command — print it where a human reads (stderr; stdout stays
+                // pure JSON for piping) with the honest boundaries spelled out.
+                if let command = outcome.stagedCommand, outcome.abortedStep == nil {
+                    errLine(
+                        "\nstaged pkg ready — AppUpdater never runs installer(8). Run this yourself:\n"
+                            + "  \(command)\n"
+                            + "The verified pkg stays on disk until you delete it. "
+                            + "Review `pkgutil --check-signature` on that path first if you want.\n"
+                    )
+                }
 
                 // Exit policy: a failed relaunch is auxiliary — the swap itself
                 // succeeded; everything else aborts with 1.

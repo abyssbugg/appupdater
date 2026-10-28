@@ -51,6 +51,13 @@ public enum BundleDeployer {
             stagedAppURL = try await extractZip(at: updated.stagedURL, into: stagingDir)
         case .dmg:
             stagedAppURL = try await extractDmg(at: updated.stagedURL, into: stagingDir)
+        case .pkg:
+            // UNREACHABLE by construction: a pkg plan ends at .stageOwnerCommand
+            // (the coordinator's staged-PKG branch terminates before any backup/
+            // deploy step). Seeing one here means the coordinator's step order
+            // regressed — honest error, never a silent guess.
+            throw InstallerError.unsupportedArtifact(
+                reason: "pkg is never deployed: the staged-PKG branch must terminate before deploy (coordinator sequencing bug)")
         }
         return DeployedBundle(stagedAppURL: stagedAppURL, kind: updated.kind)
     }

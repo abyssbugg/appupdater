@@ -54,11 +54,32 @@ import Testing
     }
 
     @Test func unsupportedExtensionsRefused() {
-        // pkg is the privileged lane; tbz/bin are not user-space v1 — honest refusal, no guessing.
-        for ext in ["pkg", "tbz", "bin"] {
+        // tbz/bin are not user-space v1 and not stageable — honest refusal, no guessing.
+        // (.pkg left this list 2026-10-27: it is now the staged-owner-command kind.)
+        for ext in ["tbz", "bin"] {
             #expect(throws: InstallerError.self) {
                 try planner.plan(app: app(), update: update(url: "https://example.com/victim.\(ext)"))
             }
+        }
+    }
+
+    @Test func pkgPlanStagesOwnerCommandNeverExecutes() throws {
+        let plan = try planner.plan(app: app(), update: update(url: "https://example.com/Victim-2.0.pkg"))
+        #expect(plan.kind == .pkg)
+        #expect(plan.steps == [.download, .verifySha256, .verifyArtifactMagic, .stageOwnerCommand])
+        // The consent boundary, pinned in the plan itself:
+        #expect(plan.warnings.contains { $0.contains("never runs installer(8)") })
+        #expect(plan.stagedCommand == "sudo installer -pkg <staged-pkg-path> -target /")
+    }
+
+    @Test func pkgKeepsTheSecurityFloor() {
+        // The staged-command convenience adds NOTHING past the floor:
+        // HTTP pkg and sha256-less pkg are still honest refusals.
+        #expect(throws: InstallerError.self) {
+            try planner.plan(app: app(), update: update(url: "http://example.com/victim.pkg"))
+        }
+        #expect(throws: InstallerError.self) {
+            try planner.plan(app: app(), update: update(url: "https://example.com/victim.pkg", sha: nil))
         }
     }
 

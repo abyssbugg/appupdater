@@ -14,12 +14,13 @@ public struct InstallPlanner: Sendable {
     public init() {}
 
     /// The kind a plan assumes, derived from the download URL's path extension.
-    /// Returns nil when the extension is not dmg/zip — planner shows the honest reason
-    /// instead of guessing.
+    /// Returns nil when the extension is not dmg/zip/pkg — planner shows the
+    /// honest reason instead of guessing (tbz/tgz/bin stay refused outright).
     public static func kind(from url: URL) -> InstallKind? {
         switch url.pathExtension.lowercased() {
         case "dmg": return .dmg
         case "zip": return .zip
+        case "pkg": return .pkg
         default: return nil
         }
     }
@@ -52,6 +53,22 @@ public struct InstallPlanner: Sendable {
         switch update.confidence {
         case .low: warnings.append("source confidence is LOW (\(update.source.rawValue)) — review the claim before applying")
         default: break
+        }
+
+        // STAGED-PKG v1 (2026-10-27): a pkg plan NEVER touches bundles. Its
+        // whole job is download → verify (sha256 floor unchanged) → leave the
+        // verified pkg in persistent staging → record the owner-run command.
+        // The security floor is IDENTICAL (HTTPS + sha256 gates above apply
+        // before this branch); the difference is only what happens after.
+        if kind == .pkg {
+            warnings.append(
+                "PKG distribution: AppUpdater never runs installer(8) — `--apply` downloads + "
+                    + "verifies the pkg, leaves it staged, and prints the owner-run command; "
+                    + "the install itself is always your hand action")
+            let steps: [InstallStep] = [.download, .verifySha256, .verifyArtifactMagic, .stageOwnerCommand]
+            return InstallPlan(
+                app: app, update: update, kind: kind, steps: steps, warnings: warnings,
+                stagedCommand: "sudo installer -pkg <staged-pkg-path> -target /")
         }
 
         let steps: [InstallStep] = [
