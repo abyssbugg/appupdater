@@ -55,6 +55,26 @@ struct ScheduleSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Display") {
+                    Picker("Show in", selection: Binding(
+                        get: { appState.displaySettings.showInDock },
+                        set: { appState.setDisplayMode(showInDock: $0) })) {
+                        Text("Menu Bar").tag(false)
+                        Text("Menu Bar + Dock").tag(true)
+                    }
+                    Text("Changing this applies on the next launch: AppUpdater is a menu-bar app, "
+                        + "and the Dock icon — which carries the pending-updates badge — appears or "
+                        + "disappears when AppUpdater is relaunched.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if let failure = appState.displayError {
+                        Label(failure, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                }
+
                 Section("Current state") {
                     ForEach(appState.menuData.scheduleSection, id: \.self) { line in
                         Label {
@@ -67,6 +87,12 @@ struct ScheduleSettingsView: View {
                         Label(failure, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
                             .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                    if let note = appState.settingsMigrationNote {
+                        Label(note, systemImage: "arrow.triangle.2.circlepath")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                             .textSelection(.enabled)
                     }
                 }
