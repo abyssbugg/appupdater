@@ -48,6 +48,11 @@ struct ScheduleSettingsView: View {
                             .foregroundStyle(.orange)
                             .textSelection(.enabled)
                     }
+                    Text("When exactly one app newly pends, its notification carries actions: "
+                        + "Open AppUpdater and Stage Install Command (copies the CLI command to "
+                        + "the clipboard — nothing runs). Other fires stay quiet summaries.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Current state") {
