@@ -456,8 +456,16 @@ private func makeProbeDir() throws -> URL {
             verify: canned(),
             gatekeeper: canned(stderr: Fixture.capySpctlAccepted),
             entitlements: canned(Fixture.calculatorEntitlementsXML))
-        let report = await SecInspector.inspect(appAt: URL(fileURLWithPath: "/Applications/Ghostty.app"), using: runner)
-        #expect(report.appPath == "/Applications/Ghostty.app")
+        // CI-hermetic (coordinator fix 2026-10-28): inspect() requires the probe
+        // path to EXIST before it reaches the (stubbed) runner — the original
+        // `/Applications/Ghostty.app` exists on dev machines but not on CI, so
+        // the existence guard short-circuited and every parse assertion failed.
+        // The stubbed fixtures carry ALL the parse coverage; the path is just
+        // a passing key. Mirrors the probe-dir pattern of the sibling tests.
+        let probeDir = try makeProbeDir()
+        defer { try? FileManager.default.removeItem(at: probeDir) }
+        let report = await SecInspector.inspect(appAt: probeDir, using: runner)
+        #expect(report.appPath == probeDir.path)
         #expect(report.signaturePresent == true)
         #expect(report.codesignValid == true)
         #expect(report.gatekeeperAssessment == .accepted)
@@ -531,7 +539,10 @@ private func makeProbeDir() throws -> URL {
             gatekeeper: canned(stderr: Fixture.capySpctlAccepted),
             entitlements: canned("\u{30}\u{82}der-ish-bytes\n"),
             entitlementsFallback: canned(Fixture.sandboxedEntitlementsXML))
-        let report = await SecInspector.inspect(appAt: URL(fileURLWithPath: "/Applications/Capy.app"), using: runner)
+        // CI-hermetic: probe path must exist (see fullySignedHappyPathReport).
+        let probeDir = try makeProbeDir()
+        defer { try? FileManager.default.removeItem(at: probeDir) }
+        let report = await SecInspector.inspect(appAt: probeDir, using: runner)
         #expect(report.entitlementsPresent == true)
         #expect(report.sandboxed == true)
         #expect(report.keychainAccessGroupsCount == 2)
@@ -563,7 +574,10 @@ private func makeProbeDir() throws -> URL {
             verify: canned(),
             gatekeeper: canned(stderr: Fixture.capySpctlAccepted),
             entitlements: canned("\u{30}\u{82}der-ish-bytes\n"))
-        let report = await SecInspector.inspect(appAt: URL(fileURLWithPath: "/Applications/Capy.app"), using: runner)
+        // CI-hermetic: probe path must exist (see fullySignedHappyPathReport).
+        let probeDir = try makeProbeDir()
+        defer { try? FileManager.default.removeItem(at: probeDir) }
+        let report = await SecInspector.inspect(appAt: probeDir, using: runner)
         #expect(report.entitlementsPresent == nil)
         #expect(report.sandboxed == nil)
         #expect(report.notes.contains { $0.contains("fallback probe could not be launched") })
@@ -682,7 +696,12 @@ private func makeProbeDir() throws -> URL {
             verify: canned(),
             gatekeeper: canned(stderr: Fixture.capySpctlAccepted),
             entitlements: canned(Fixture.sandboxedEntitlementsXML))
-        let report = await SecInspector.inspect(appAt: URL(fileURLWithPath: "/Applications/Capy.app"), using: runner)
+        // CI-hermetic: probe path must exist (see fullySignedHappyPathReport) —
+        // otherwise dev machines exercise the full inspect path while CI
+        // exercises only the existence-guard short-circuit.
+        let probeDir = try makeProbeDir()
+        defer { try? FileManager.default.removeItem(at: probeDir) }
+        let report = await SecInspector.inspect(appAt: probeDir, using: runner)
         let data = try JSONEncoder().encode(report)
         let decoded = try JSONDecoder().decode(SecReport.self, from: data)
         #expect(decoded == report) // Codable + Hashable: field-for-field equal
