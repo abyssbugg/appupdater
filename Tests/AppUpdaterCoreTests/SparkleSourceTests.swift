@@ -121,11 +121,35 @@ struct SparkleSourceTests {
     </rss>
     """#
 
+    /// One item whose `<sparkle:deltas>` carries four delta enclosures: two well-formed
+    /// (distinct from-versions, url, length, edSignature), one WITHOUT `sparkle:deltaFrom`
+    /// (Sparkle itself skips those), and one with a non-numeric `length` (stays nil, honest).
+    private static let deltasAppcastXML = #"""
+    <?xml version="1.0" standalone="yes"?>
+    <rss xmlns:sparkle="http://www.sparkle-project.org/xml/sparkle/2008" version="2.0">
+      <channel>
+        <title>DeltaApp Updates</title>
+        <item>
+          <title>Version 2.0</title>
+          <pubDate>Mon, 27 Oct 2025 10:00:00 +0000</pubDate>
+          <enclosure url="https://example.com/files/Delta-2.0.zip" sparkle:version="2.0.0" sparkle:shortVersionString="2.0" sparkle:edSignature="MEUCIQDMainArtifactSignature1234==" type="application/octet-stream" length="9000000"/>
+          <sparkle:deltas>
+            <enclosure url="https://example.com/files/Delta-1.5-2.0.bin" sparkle:version="2.0.0" sparkle:deltaFrom="1.5.0" length="1200000" type="application/octet-stream" sparkle:edSignature="MEUCIQDDeltaFromOnePointFiveSig4567=="/>
+            <enclosure url="https://example.com/files/Delta-1.9-2.0.bin" sparkle:version="2.0.0" sparkle:deltaFrom="1.9.0" length="600000" type="application/octet-stream" sparkle:edSignature="MEUCIQDDeltaFromOnePointNineSig7890=="/>
+            <enclosure url="https://example.com/files/Delta-no-from.bin" sparkle:version="2.0.0" length="500000"/>
+            <enclosure url="https://example.com/files/Delta-garbage-length.bin" sparkle:deltaFrom="1.0.0" length="12O0"/>
+          </sparkle:deltas>
+        </item>
+      </channel>
+    </rss>
+    """#
+
     private static let routes: [String: (status: Int, body: String)] = [
         RoutePath.main: (200, mainAppcastXML),
         RoutePath.fallback: (200, fallbackAppcastXML),
         RoutePath.older: (200, olderAppcastXML),
         RoutePath.channels: (200, channelsAppcastXML),
+        "/v1/deltas.xml": (200, deltasAppcastXML),
     ]
 
     // MARK: - Hermetic transport
@@ -407,5 +431,91 @@ struct SparkleSourceTests {
         let empty = try #require(SparkleSource.selectAdmissible(
             items, declaredChannel: "", installedBundleVersion: nil))
         #expect(empty.sparkleVersion == "1.0.0")
+    }
+
+    // MARK: - Delta updates (lane delta-backup; parse + expose ONLY, never installed)
+
+    @Test
+    func deltasParseVerbatimFromSparkleDeltasElement() throws {
+        let (items, parseError) = AppcastParser.parse(data: Data(Self.deltasAppcastXML.utf8))
+        #expect(parseError == nil)
+        let item = try #require(items.first)
+        // The delta without sparkle:deltaFrom is skipped (upstream SUAppcastItem semantics);
+        // the garbage-length one is kept with an honest nil byte count. 4 − 1 = 3.
+        #expect(item.deltas.count == 3)
+
+        let from15 = try #require(item.deltas.first { $0.fromVersion == "1.5.0" })
+        #expect(from15.url?.absoluteString == "https://example.com/files/Delta-1.5-2.0.bin")
+        #expect(from15.lengthBytes == 1_200_000)
+        #expect(from15.edSignature == "MEUCIQDDeltaFromOnePointFiveSig4567==")
+
+        let from19 = try #require(item.deltas.first { $0.fromVersion == "1.9.0" })
+        #expect(from19.lengthBytes == 600_000)
+        #expect(from19.edSignature == "MEUCIQDDeltaFromOnePointNineSig7890==")
+
+        let garbageLength = try #require(item.deltas.first { $0.fromVersion == "1.0.0" })
+        #expect(garbageLength.lengthBytes == nil)  // non-numeric length stays nil, never guessed
+
+        // The item's FULL artifact enclosure is untouched by the delta parsing.
+        #expect(item.enclosureURL?.absoluteString == "https://example.com/files/Delta-2.0.zip")
+        #expect(item.edSignature == "MEUCIQDMainArtifactSignature1234==")
+    }
+
+    @Test
+    func deltasSurfaceOnUpdateInfoWithHonestNotUsedNote() async throws {
+        let source = makeSource()
+        let info = try await source.fetchUpdateInfo(
+            for: makeApp(path: "/v1/deltas.xml", bundleVersion: "1.2.0"))
+
+        let update = try #require(info)
+        let deltas = try #require(update.sparkleDeltas)
+        #expect(deltas.count == 3)
+        #expect(deltas.contains { $0.fromVersion == "1.5.0" })
+
+        // Honesty: the INSTALL artifact is still the full enclosure — never a delta URL.
+        #expect(update.downloadURL?.absoluteString == "https://example.com/files/Delta-2.0.zip")
+
+        let detail = try #require(update.sourceDetail)
+        #expect(detail.contains(
+            "3 delta update(s) available but not used (v1 installs full artifacts)"))
+    }
+
+    @Test
+    func appcastWithoutDeltasKeepsFieldNilAndNoDeltaNote() async throws {
+        let source = makeSource()
+        let info = try await source.fetchUpdateInfo(
+            for: makeApp(path: RoutePath.main, bundleVersion: "1.2.3"))
+
+        let update = try #require(info)
+        #expect(update.sparkleDeltas == nil)  // absence stays nil across the wire
+        #expect(update.sourceDetail?.lowercased().contains("delta") == false)
+    }
+
+    @Test
+    func legacyUpdateInfoJSONWithoutDeltasKeyStillDecodes() throws {
+        // Pre-delta payload shape (no sparkleDeltas key) must keep decoding — additive
+        // Codable amendment, same contract as the suDefaultChannel/stagedCommand fields.
+        let legacyJSON = #"""
+        {"source":"sparkle","newestShortVersion":"2.0","newestBundleVersion":"2.0.0",
+         "downloadURL":"https://example.com/files/Delta-2.0.zip","confidence":"high",
+         "sourceDetail":"EdDSA signature present"}
+        """#
+        let decoded = try JSONDecoder().decode(UpdateInfo.self, from: Data(legacyJSON.utf8))
+        #expect(decoded.source == .sparkle)
+        #expect(decoded.newestBundleVersion == "2.0.0")
+        #expect(decoded.sparkleDeltas == nil)
+
+        // Forward path: a payload WITH deltas round-trips losslessly.
+        var info = UpdateInfo(source: .sparkle, newestShortVersion: "2.0", confidence: .high)
+        info.sparkleDeltas = [
+            SparkleDelta(
+                fromVersion: "1.9.0",
+                url: URL(string: "https://example.com/files/Delta-1.9-2.0.bin"),
+                lengthBytes: 600_000,
+                edSignature: nil)
+        ]
+        let encoded = try JSONEncoder().encode(info)
+        let back = try JSONDecoder().decode(UpdateInfo.self, from: encoded)
+        #expect(back.sparkleDeltas == info.sparkleDeltas)
     }
 }

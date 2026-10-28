@@ -9,6 +9,7 @@
 // field was added to the frozen `BackupReceipt` — the format is a property of this
 // implementation, stated here instead of inventing an extra field to read.
 
+import Darwin
 import Foundation
 
 /// ZIP-only backup of installed apps before the installer swaps their bundle
@@ -38,13 +39,69 @@ import Foundation
 /// ditto(1)'s own manual prescribes `unzip -l archive.zip` for PKZip listing, so that
 /// system verb (`/usr/bin/unzip`, no extra permissions) performs the check. Creation and
 /// extraction still use ditto exclusively.
+///
+/// Time Machine awareness (lane delta-backup): before a receipt is returned, the backup
+/// destination is probed for a Time Machine association (`TimeMachineProbe` seam; the
+/// default probe is a documented best-effort marker check). On a TM association the backup
+/// is NEVER failed or skipped — a pre-swap backup is the user's last line of defense — it
+/// is ADJUSTED (best-effort `com.apple.metadata:com_apple_backup_excludeItem` exclusion
+/// attribute on the finished zip, the documented macOS mechanism for keeping paths out of
+/// Time Machine sweeps) and the situation is recorded as an honest note on
+/// `BackupOutcome.timeMachineNote`. Probing and adjustment can never make the backup fail;
+/// an indeterminate probe (`.unknown`) records nothing rather than guessing. Callers that
+/// only need the receipt keep `backup(app:into:)` — unchanged signature and behavior for
+/// non-TM destinations (no probe side effects there, byte-identical to pre-lane runs).
+/// Time Machine association of a backup destination, as decided by a `TimeMachineProbe`.
+/// Detection is best-effort by design: an indeterminate answer is `.unknown`, never a guess.
+public enum TimeMachineStatus: Hashable, Sendable {
+    /// No Time Machine association detected (the overwhelmingly common case; no note, no
+    /// adjustment — behavior is identical to the pre-TM-aware backup).
+    case notTimeMachine
+    /// The destination volume itself is a Time Machine backup volume.
+    case timeMachineDestination
+    /// The destination path sits INSIDE a Time Machine backup store (`Backups.backupdb` /
+    /// `*.backupbundle` component) — writing new backups there is discouraged.
+    case insideTimeMachineStore
+    /// The probe could not decide (e.g. the volume root could not be enumerated). Nothing
+    /// is claimed and no note is recorded — never a failure, never a guess.
+    case unknown
+}
+
+/// A performed backup plus any honest Time Machine note recorded while producing it.
+/// `BackupReceipt` stays frozen (coordinator-owned interchange type in InstallModels.swift),
+/// so the note travels beside it on this additive outcome type.
+public struct BackupOutcome: Sendable {
+    public var receipt: BackupReceipt
+    /// nil when the destination showed no Time Machine association (or the probe could not
+    /// decide). Otherwise a one-line honest statement of what was detected and adjusted.
+    public var timeMachineNote: String?
+
+    public init(receipt: BackupReceipt, timeMachineNote: String?) {
+        self.receipt = receipt
+        self.timeMachineNote = timeMachineNote
+    }
+}
+
 public struct BackupManager: Sendable {
-    public init() {}
+    /// Seam: decides the Time Machine status of a backup destination. The default probe is
+    /// `BackupManager.defaultTimeMachineProbe`; tests inject canned statuses (no real disk
+    /// probing required). Non-throwing by contract — an implementation that cannot decide
+    /// returns `.unknown` instead of guessing.
+    public typealias TimeMachineProbe = @Sendable (URL) -> TimeMachineStatus
+
+    /// The injected probe, or nil when the default probe should be used (plain `init()`).
+    private let timeMachineProbe: TimeMachineProbe?
+
+    public init(timeMachineProbe: TimeMachineProbe? = nil) {
+        self.timeMachineProbe = timeMachineProbe
+    }
 
     // MARK: - Backup
 
     /// Zips the OLD app bundle at `app.path` into `backupsRoot` and returns a receipt
-    /// describing exactly what was preserved.
+    /// describing exactly what was preserved. Time Machine notes are not part of the frozen
+    /// receipt type — call `backupWithNote(app:into:)` when the note matters; the backup
+    /// performed is identical either way.
     ///
     /// The original short/bundle versions are re-read from the bundle's Info.plist at
     /// backup time (fresh truth on disk — not the scan-time fields), matching the
@@ -55,12 +112,23 @@ public struct BackupManager: Sendable {
     /// - Throws: `InstallerError.backupFailed(reason:)` when ditto fails or any
     ///   verification check fails; the partial zip is deleted in both cases.
     public func backup(app: InstalledApp, into backupsRoot: URL) async throws -> BackupReceipt {
-        try await backup(app: app, into: backupsRoot, at: Date())
+        try await backupWithNote(app: app, into: backupsRoot).receipt
+    }
+
+    /// Same backup as `backup(app:into:)`, plus the honest Time Machine note for the
+    /// destination (nil when none was detected). See the struct-level TM documentation.
+    public func backupWithNote(app: InstalledApp, into backupsRoot: URL) async throws -> BackupOutcome {
+        try await backupWithNote(app: app, into: backupsRoot, at: Date())
     }
 
     /// Internal seam for deterministic tests: backs up as if performed at `createdAt`.
-    /// The public `backup(app:into:)` is this with the current time — no divergence.
+    /// The public `backup(app:into:)`/`backupWithNote(app:into:)` are these with the
+    /// current time — no divergence.
     func backup(app: InstalledApp, into backupsRoot: URL, at createdAt: Date) async throws -> BackupReceipt {
+        try await backupWithNote(app: app, into: backupsRoot, at: createdAt).receipt
+    }
+
+    func backupWithNote(app: InstalledApp, into backupsRoot: URL, at createdAt: Date) async throws -> BackupOutcome {
         let folderName = Self.sanitizedFolderName(forBundleIdentifier: app.bundleIdentifier)
         guard !folderName.isEmpty else {
             throw InstallerError.backupFailed(
@@ -125,13 +193,33 @@ public struct BackupManager: Sendable {
         // Versions: fresh off disk at backup time (InfoProbe reads the plist directly,
         // never Bundle's process-wide cache; hermetic bundles need only Contents/).
         let plist = InfoProbe.infoDictionary(appBundleURL: URL(fileURLWithPath: appPath))
-        return BackupReceipt(
+        let receipt = BackupReceipt(
             zipURL: target,
             originalPath: appPath,
             originalShortVersion: InfoProbe.string(for: ["CFBundleShortVersionString"], in: plist),
             originalBundleVersion: InfoProbe.string(for: ["CFBundleVersion"], in: plist),
             createdAt: createdAt,
             byteCount: byteCount)
+
+        // Time Machine awareness: probe the DESTINATION (the root the caller chose). The
+        // situation never fails or skips the backup — the pre-swap artifact stays the last
+        // line of defense. Adjustment is best-effort (exclusion attribute on the finished
+        // zip); the honest note records what was detected and what was done. `.unknown`
+        // claims nothing. Non-TM destinations: no side effects at all.
+        let probe = timeMachineProbe ?? Self.defaultTimeMachineProbe
+        let tmStatus = probe(backupsRoot)
+        var timeMachineNote: String?
+        switch tmStatus {
+        case .timeMachineDestination, .insideTimeMachineStore:
+            let exclusionApplied = Self.setTimeMachineExclusion(on: target)
+            timeMachineNote = Self.timeMachineNote(
+                status: tmStatus,
+                destination: backupsRoot,
+                exclusionApplied: exclusionApplied)
+        case .notTimeMachine, .unknown:
+            break
+        }
+        return BackupOutcome(receipt: receipt, timeMachineNote: timeMachineNote)
     }
 
     // MARK: - Retention
@@ -288,6 +376,89 @@ public struct BackupManager: Sendable {
             && chars[10] == "T" && chars[17] == "Z"
         guard year, month, day, time, separators else { return nil }
         return token
+    }
+
+    // MARK: - Time Machine awareness (lane delta-backup)
+
+    /// The macOS extended attribute Time Machine honors to keep a path out of backup
+    /// sweeps (the same mechanism Apple applies to system caches). Value is the plain
+    /// string `com.apple.backupd`, stored without a trailing NUL byte.
+    static let timeMachineExclusionXattr = "com.apple.metadata:com_apple_backup_excludeItem"
+    static let timeMachineExclusionValue = "com.apple.backupd"
+
+    /// The default `TimeMachineProbe`: a documented, best-effort marker check — honest
+    /// about its limits, never guessing:
+    ///
+    /// 1. **Inside a TM store**: any path component equal to `Backups.backupdb` (the
+    ///    classic Time Machine store directory: Backups.backupdb/&lt;host&gt;/&lt;date&gt;/…)
+    ///    or ending in `.backupbundle` (the modern per-machine APFS Time Machine store
+    ///    wrapper) ⇒ `.insideTimeMachineStore`. Pure path analysis — no filesystem access.
+    /// 2. **Destination volume is a TM volume**: only meaningful for `/Volumes/<name>`
+    ///    roots (the boot volume cannot be a Time Machine destination). The volume root is
+    ///    a TM volume when `Backups.backupdb` exists at its root, or any top-level entry
+    ///    ends in `.backupbundle`. If the root cannot be enumerated, `.unknown` — no guess.
+    /// 3. Anything else ⇒ `.notTimeMachine`.
+    ///
+    /// Marker absence is trusted under best-effort semantics (an unreadable root that
+    /// still exists is reported via `.unknown` only for the enumeration step; a plain
+    /// `fileExists` false is treated as marker-absent). Refinements belong behind the
+    /// `TimeMachineProbe` seam, not in more heuristics here.
+    static func defaultTimeMachineProbe(for destination: URL) -> TimeMachineStatus {
+        let components = destination.path.split(separator: "/").map(String.init)
+        if components.contains(where: { $0 == "Backups.backupdb" || $0.hasSuffix(".backupbundle") }) {
+            return .insideTimeMachineStore
+        }
+        guard components.count >= 2, components[0] == "Volumes" else { return .notTimeMachine }
+        let volumeRoot = "/Volumes/\(components[1])"
+        if FileManager.default.fileExists(atPath: volumeRoot + "/Backups.backupdb") {
+            return .timeMachineDestination
+        }
+        do {
+            let entries = try FileManager.default.contentsOfDirectory(atPath: volumeRoot)
+            if entries.contains(where: { $0.hasSuffix(".backupbundle") }) {
+                return .timeMachineDestination
+            }
+            return .notTimeMachine
+        } catch {
+            return .unknown
+        }
+    }
+
+    /// Best-effort exclusion attribute on the finished zip. Returns whether setxattr
+    /// reported success; a failure never propagates (the backup is kept as-is and the
+    /// note says the exclusion could not be applied).
+    static func setTimeMachineExclusion(on url: URL) -> Bool {
+        var value = Array(Self.timeMachineExclusionValue.utf8)
+        let byteCount = value.count
+        return value.withUnsafeMutableBufferPointer { valueBuffer in
+            Self.timeMachineExclusionXattr.withCString { xattrName in
+                url.path(percentEncoded: false).withCString { path in
+                    setxattr(path, xattrName, valueBuffer.baseAddress, byteCount, 0, 0) == 0
+                }
+            }
+        }
+    }
+
+    /// The honest one-line note recorded on `BackupOutcome.timeMachineNote` when a TM
+    /// association was detected: what was seen at the destination and what was (or was
+    /// not) adjusted about it.
+    static func timeMachineNote(status: TimeMachineStatus, destination: URL, exclusionApplied: Bool) -> String {
+        let detected: String
+        switch status {
+        case .timeMachineDestination:
+            detected = "Backup destination \(destination.path) is a Time Machine backup volume"
+        case .insideTimeMachineStore:
+            detected = "Backup destination \(destination.path) sits inside a Time Machine backup "
+                + "store (Backups.backupdb / .backupbundle) — relocating the backups root off the "
+                + "Time Machine store is recommended"
+        case .notTimeMachine, .unknown:
+            return ""  // unreachable: callers only build notes for detected associations
+        }
+        let adjustment = exclusionApplied
+            ? "backup zip marked excluded from Time Machine "
+                + "(\(timeMachineExclusionXattr))"
+            : "exclusion could not be applied (best-effort only; the backup is kept as-is)"
+        return detected + "; " + adjustment
     }
 
     // MARK: - Process plumbing

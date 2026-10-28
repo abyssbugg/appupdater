@@ -110,6 +110,13 @@ public struct SparkleSource: UpdateSource {
             detailParts.append("critical")
         }
         detailParts.append("channel: \(selected.channel ?? "default")")
+        // Deltas are an information-only surface: v1 installs the full enclosure, never a
+        // delta patch — the detail line states that plainly instead of implying support.
+        let deltas = selected.deltas
+        if !deltas.isEmpty {
+            detailParts.append(
+                "\(deltas.count) delta update(s) available but not used (v1 installs full artifacts)")
+        }
 
         return UpdateInfo(
             source: .sparkle,
@@ -123,7 +130,10 @@ public struct SparkleSource: UpdateSource {
             releaseDate: selected.pubDate,
             releaseNotes: selected.releaseNotes,
             confidence: carriesSignature ? .high : .medium,
-            sourceDetail: detailParts.joined(separator: "; ")
+            sourceDetail: detailParts.joined(separator: "; "),
+            // nil (not []) when the item carries no deltas: absence stays nil across the
+            // Codable round-trip, matching pre-delta payloads.
+            sparkleDeltas: deltas.isEmpty ? nil : deltas
         )
     }
 

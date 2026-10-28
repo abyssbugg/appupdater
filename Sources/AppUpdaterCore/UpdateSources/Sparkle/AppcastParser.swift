@@ -23,6 +23,10 @@ struct SparkleAppcastItem: Sendable, Hashable {
     var pubDate: Date?
     /// `sparkle:releaseNotesLink` text, else the item `<description>` HTML, stored as-given.
     var releaseNotes: String?
+    /// Delta-update enclosures from the item's `<sparkle:deltas>` element (Sparkle 2 delta
+    /// format), in feed order, verbatim. Empty when the item carries no deltas.
+    /// INFORMATION-ONLY: v1 never installs deltas — the full enclosure is the install artifact.
+    var deltas: [SparkleDelta] = []
 }
 
 // MARK: - Parser
@@ -44,6 +48,12 @@ struct SparkleAppcastItem: Sendable, Hashable {
 /// - `minimumSystemVersion`: item-level wins, channel-level `sparkle:minimumSystemVersion` is the fallback.
 /// - `criticalUpdate` may appear as the `sparkle:criticalUpdate` element or as the same-named
 ///   namespaced attribute on the enclosure (older feeds).
+/// - `sparkle:deltas` (item element, sparkle-namespaced): its `<enclosure>` children are delta
+///   patches, keyed by the `sparkle:deltaFrom` attribute (the FROM version; Sparkle itself skips
+///   delta enclosures without it). Each is parsed verbatim — fromVersion, url, length, edSignature
+///   — into `SparkleDelta`. Deltas are INFORMATION-ONLY for v1 (never installed); a `<deltas>`
+///   element without the sparkle namespace is out of spec and ignored, like all unnamespaced
+///   sparkle fields.
 /// - Malformed XML: items already closed before the error are kept; `parseError` carries the
 ///   remaining truth for callers that want to react to a partially-broken feed.
 enum AppcastParser {
@@ -175,6 +185,7 @@ private final class Collector: NSObject, XMLParserDelegate {
         var pubDateRaw: String?
         var releaseNotesLink: String?
         var descriptionHTML: String?
+        var deltas: [RawDelta] = []
     }
 
     private(set) var rawItems: [RawItem] = []
@@ -184,8 +195,27 @@ private final class Collector: NSObject, XMLParserDelegate {
     private var current: RawItem?
     private var channelDepth = 0
     private var insideItem = false
+    private var insideDeltas = false
     private var capture: CaptureKind?
     private var buffer = ""
+
+    /// One raw `<enclosure>` seen inside `<sparkle:deltas>` — fields optional while parsing;
+    /// `finish()` drops entries with no usable `deltaFrom` (upstream skip semantics).
+    struct RawDelta {
+        var deltaFrom: String?
+        var url: URL?
+        var lengthBytes: Int64?
+        var edSignature: String?
+    }
+
+    /// Strict integer parse for an enclosure `length` attribute: whole ASCII digits only,
+    /// whitespace-trimmed; anything else (signs, floats, garbage) stays nil — honest absence
+    /// beats a guessed byte count.
+    private static func numericInt64(_ raw: String) -> Int64? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int64(value)
+    }
 
     private enum CaptureKind {
         case itemMinimumSystem
@@ -207,7 +237,17 @@ private final class Collector: NSObject, XMLParserDelegate {
                 channel: trimmed(raw.channel),
                 pubDate: raw.pubDateRaw.flatMap(AppcastParser.parseAppcastDate),
                 releaseNotes: trimmed(raw.releaseNotesLink)
-                    ?? (raw.descriptionHTML?.isEmpty == false ? raw.descriptionHTML : nil)
+                    ?? (raw.descriptionHTML?.isEmpty == false ? raw.descriptionHTML : nil),
+                deltas: raw.deltas.compactMap { delta in
+                    // Upstream semantics (SUAppcastItem.m): a delta enclosure without a
+                    // deltaFrom version is not a keyed delta — skip it rather than guess.
+                    guard let fromVersion = trimmed(delta.deltaFrom) else { return nil }
+                    return SparkleDelta(
+                        fromVersion: fromVersion,
+                        url: delta.url,
+                        lengthBytes: delta.lengthBytes,
+                        edSignature: trimmed(delta.edSignature))
+                }
             )
         }
     }
@@ -257,6 +297,29 @@ private final class Collector: NSObject, XMLParserDelegate {
         }
 
         guard insideItem, var item = current else { return }
+
+        // Delta scope: sparkle:deltas opens a scope whose <enclosure> children are delta
+        // patches — NOT the item's main artifact. Everything inside the scope routes here.
+        if AppcastParser.isSparkleNamespace(namespaceURI), elementName == "deltas" {
+            insideDeltas = true
+            current = item
+            return
+        }
+        if insideDeltas {
+            if elementName == "enclosure" {
+                var delta = RawDelta()
+                if let url = attributeDict["url"], !url.isEmpty {
+                    delta.url = URL(string: url)
+                }
+                if let length = attributeDict["length"] {
+                    delta.lengthBytes = Self.numericInt64(length)
+                }
+                applyDeltaAttributes(attributeDict, into: &delta)
+                item.deltas.append(delta)
+            }
+            current = item
+            return
+        }
 
         if elementName == "enclosure" {
             if let url = attributeDict["url"], !url.isEmpty {
@@ -353,8 +416,13 @@ private final class Collector: NSObject, XMLParserDelegate {
             }
         }
 
+        if AppcastParser.isSparkleNamespace(namespaceURI), elementName == "deltas", insideDeltas {
+            insideDeltas = false
+        }
+
         if isRSSPlain, elementName == "item", insideItem {
             insideItem = false
+            insideDeltas = false  // malformed unclosed <deltas> must not leak into the next item
             capture = nil
             if let finished = current {
                 rawItems.append(finished)
@@ -381,6 +449,38 @@ private final class Collector: NSObject, XMLParserDelegate {
     }
 
     // MARK: sparkle attribute resolution
+
+    /// Sparkle-attribute resolution for a delta enclosure: same prefix→URI mapping rules and
+    /// de-facto "sparkle" prefix tolerance as `applySparkleAttributes`, over the delta field
+    /// names. Unprefixed exact-name acceptance covers `deltaFrom`/`edSignature` on delta
+    /// enclosures only (same documented tolerance as the main enclosure's field names).
+    private func applyDeltaAttributes(_ attributes: [String: String], into delta: inout RawDelta) {
+        let sparkleFieldNames: Set<String> = ["deltaFrom", "edSignature"]
+        for (key, value) in attributes {
+            let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
+            let localName: String
+            let resolvedIsSparkle: Bool
+            if parts.count == 2 {
+                let prefix = parts[0]
+                localName = parts[1]
+                let uri = prefixURIs[prefix]
+                resolvedIsSparkle = AppcastParser.isSparkleNamespace(uri) || (uri == nil && prefix == "sparkle")
+            } else {
+                localName = key
+                resolvedIsSparkle = sparkleFieldNames.contains(key)
+            }
+            guard resolvedIsSparkle, !value.isEmpty else { continue }
+
+            switch localName {
+            case "deltaFrom":
+                if delta.deltaFrom == nil { delta.deltaFrom = value }
+            case "edSignature":
+                if delta.edSignature == nil { delta.edSignature = value }
+            default:
+                break
+            }
+        }
+    }
 
     /// Attribute keys arrive prefixed ("sparkle:version") with no URI parameter, so the prefix is
     /// resolved through the mapping callbacks. Tolerances (both documented, deliberately narrow):

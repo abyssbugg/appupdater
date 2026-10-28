@@ -103,6 +103,28 @@ private func fileSize(at url: URL) throws -> Int64 {
     return (attributes[.size] as? NSNumber)?.int64Value ?? 0
 }
 
+/// Reads a named extended attribute, or nil when absent (size-0 probe then full read via
+/// Darwin getxattr — the same attribute the TM exclusion writes).
+private func readXattr(_ name: String, at url: URL) throws -> Data? {
+    let path = url.path(percentEncoded: false)
+    return try path.withCString { cPath in
+        try name.withCString { cName in
+            let size = getxattr(cPath, cName, nil, 0, 0, 0)
+            guard size > 0 else { return nil }
+            var data = Data(count: size)
+            let read = data.withUnsafeMutableBytes { (raw: UnsafeMutableRawBufferPointer) in
+                getxattr(cPath, cName, raw.baseAddress, size, 0, 0)
+            }
+            guard read >= 0 else {
+                throw CocoaError(.fileReadUnknown, userInfo: [
+                    NSLocalizedDescriptionKey: "getxattr failed for \(name) on \(path)",
+                ])
+            }
+            return data
+        }
+    }
+}
+
 // MARK: - Tests
 
 @Suite struct BackupTests {
@@ -294,5 +316,105 @@ private func fileSize(at url: URL) throws -> Int64 {
         #expect(hint.contains("ditto -x -k"))
         #expect(hint.contains("2026-10-26T103000Z-Foo.app.zip"))
         #expect(hint.contains("/Applications"))
+    }
+
+    // MARK: - Time Machine awareness (lane delta-backup)
+
+    // (8) TM destination: backup is NEVER skipped — zip verifies as usual, the exclusion
+    //     attribute is really applied to the zip, and the note states both honestly.
+    @Test func timeMachineDestinationAdjustsZipAndRecordsNote() async throws {
+        let workspace = try makeWorkspace()
+        let backupsRoot = workspace.appendingPathComponent("Backups", isDirectory: true)
+        let fixture = try writeFixtureApp(in: workspace.appendingPathComponent("Apps"))
+        let manager = BackupManager(timeMachineProbe: { _ in .timeMachineDestination })
+
+        let outcome = try await manager.backupWithNote(app: fixture.app, into: backupsRoot)
+
+        // The pre-swap artifact exists and is verified — TM awareness never skips it.
+        #expect(FileManager.default.fileExists(atPath: outcome.receipt.zipURL.path(percentEncoded: false)))
+        #expect(outcome.receipt.byteCount > 0)
+        #expect(try fileSize(at: outcome.receipt.zipURL) == outcome.receipt.byteCount)
+
+        // The adjustment is REAL on disk: the documented TM exclusion attribute is on the zip.
+        let xattr = try readXattr(BackupManager.timeMachineExclusionXattr, at: outcome.receipt.zipURL)
+        #expect(xattr == Data(BackupManager.timeMachineExclusionValue.utf8))
+
+        // The note reports what was detected and what was done — no invented certainty.
+        let note = try #require(outcome.timeMachineNote)
+        #expect(note.contains("Time Machine backup volume"))
+        #expect(note.contains("marked excluded from Time Machine"))
+        #expect(note.contains(BackupManager.timeMachineExclusionXattr))
+    }
+
+    // (9) Destination inside a TM store: still backs up (never fails), stronger relocation
+    //     advice in the note, exclusion attribute applied best-effort.
+    @Test func insideTimeMachineStoreStillBacksUpWithRelocationAdvice() async throws {
+        let workspace = try makeWorkspace()
+        let backupsRoot = workspace.appendingPathComponent("Backups", isDirectory: true)
+        let fixture = try writeFixtureApp(in: workspace.appendingPathComponent("Apps"))
+        let manager = BackupManager(timeMachineProbe: { _ in .insideTimeMachineStore })
+
+        let outcome = try await manager.backupWithNote(app: fixture.app, into: backupsRoot)
+
+        #expect(FileManager.default.fileExists(atPath: outcome.receipt.zipURL.path(percentEncoded: false)))
+        let note = try #require(outcome.timeMachineNote)
+        #expect(note.contains("sits inside a Time Machine backup store"))
+        #expect(note.contains("relocating the backups root"))
+        let xattr = try readXattr(BackupManager.timeMachineExclusionXattr, at: outcome.receipt.zipURL)
+        #expect(xattr != nil)
+    }
+
+    // (10) Non-TM destination via the DEFAULT probe: no note, no exclusion attribute —
+    //      pre-TM-aware behavior is byte-identical (no side effects at all).
+    @Test func nonTimeMachineDestinationKeepsOldBehavior() async throws {
+        let workspace = try makeWorkspace()
+        let backupsRoot = workspace.appendingPathComponent("Backups", isDirectory: true)
+        let fixture = try writeFixtureApp(in: workspace.appendingPathComponent("Apps"))
+
+        // The default probe on a boot-volume temp path decides without any TM markers.
+        #expect(BackupManager.defaultTimeMachineProbe(for: backupsRoot) == .notTimeMachine)
+
+        let outcome = try await BackupManager().backupWithNote(app: fixture.app, into: backupsRoot)
+
+        #expect(outcome.timeMachineNote == nil)
+        let xattr = try readXattr(BackupManager.timeMachineExclusionXattr, at: outcome.receipt.zipURL)
+        #expect(xattr == nil)
+        // The plain backup(app:into:) surface still works and returns just the receipt.
+        let receipt = try await BackupManager().backup(app: fixture.app, into: backupsRoot, at: Date(timeIntervalSince1970: 1761478300))
+        #expect(receipt.byteCount > 0)
+    }
+
+    // (11) Indeterminate probe (.unknown): claims nothing, records nothing, never fails.
+    @Test func unknownProbeRecordsNothingAndNeverFails() async throws {
+        let workspace = try makeWorkspace()
+        let backupsRoot = workspace.appendingPathComponent("Backups", isDirectory: true)
+        let fixture = try writeFixtureApp(in: workspace.appendingPathComponent("Apps"))
+        let manager = BackupManager(timeMachineProbe: { _ in .unknown })
+
+        let outcome = try await manager.backupWithNote(app: fixture.app, into: backupsRoot)
+
+        #expect(outcome.timeMachineNote == nil)  // no guess masquerading as honesty
+        #expect(FileManager.default.fileExists(atPath: outcome.receipt.zipURL.path(percentEncoded: false)))
+        let xattr = try readXattr(BackupManager.timeMachineExclusionXattr, at: outcome.receipt.zipURL)
+        #expect(xattr == nil)
+    }
+
+    // (12) Default probe semantics: store-component detection is pure path analysis (no
+    //      filesystem access needed); a nonexistent /Volumes root honestly reports unknown.
+    @Test func defaultProbeFlagsStoreComponentsAndUnknownRoots() {
+        // TM1 store directory in the path — decided by components alone.
+        #expect(BackupManager.defaultTimeMachineProbe(
+            for: URL(fileURLWithPath: "/Volumes/Store/Backups.backupdb/mac/2026-01-01"))
+            == .insideTimeMachineStore)
+        // Modern per-machine APFS TM store wrapper (.backupbundle component).
+        #expect(BackupManager.defaultTimeMachineProbe(
+            for: URL(fileURLWithPath: "/Volumes/Store/A1B2C3.backupbundle/backups"))
+            == .insideTimeMachineStore)
+        // Boot-volume path (no Volumes prefix, no markers) — cannot be a TM destination.
+        #expect(BackupManager.defaultTimeMachineProbe(
+            for: URL(fileURLWithPath: "/tmp/appupdater-normal/Backups")) == .notTimeMachine)
+        // /Volumes root that does not exist: enumeration fails ⇒ honest .unknown, no guess.
+        #expect(BackupManager.defaultTimeMachineProbe(
+            for: URL(fileURLWithPath: "/Volumes/DefinitelyNotAVolume/backups")) == .unknown)
     }
 }
