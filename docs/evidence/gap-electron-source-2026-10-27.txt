@@ -1,0 +1,208 @@
+gap: electron-source — lane evidence
+==============================================================
+worktree : /Users/datamatics/dev/appupdater/.worktrees/electron-source
+branch   : gap/electron-source (from main)
+date     : 2026-10-27
+lane     : GAP-ANALYSIS #4 — Electron source (app-update.yml + asar fallback)
+status   : ALL GATE LINES GREEN (below, verbatim) — 3 sequential full runs
+
+WHAT LANDED
+--------------------------------------------------------------
+- Sources/AppUpdaterCore/UpdateSources/Electron/ElectronSource.swift
+  `public struct ElectronSource: UpdateSource, Sendable`, SourceKind
+  `.unknown` (ok-lane rationale documented in-file: the engine sorts unknown
+  LAST and VersionOracle surfaces unknown claims ONLY when no cask/sparkle/
+  mas/github candidate exists — matching Updatest's framing that these apps
+  "update themselves when launched").
+- Sources/AppUpdaterCore/UpdateSources/Electron/ElectronYaml.swift
+  minimal flat-key reader for app-update.yml (provider/owner/repo/url/channel)
+  + latest-mac.yml (version REQUIRED / files[]{url,sha512,size} / path /
+  sha512 / releaseName / releaseDate) + ISO8601-first tolerant releaseDate.
+- Sources/AppUpdaterCore/UpdateSources/Electron/AsarReader.swift
+  READ-ONLY asar header parse + bounded member slice (verified layout below).
+- Tests/AppUpdaterCoreTests/ElectronSourceTests.swift
+  23 hermetic tests (Swift Testing, URLProtocol stubs, unique per-process
+  temp bundle fixtures, synthesized real-layout asar writer).
+
+DESIGN DECISIONS (all per brief)
+--------------------------------------------------------------
+- SourceKind .unknown — coordinator-owned enum REUSED, no new kind.
+- Pipeline A (app-update.yml; presence wins): provider "github"+owner+repo →
+  GET https://api.github.com/repos/<owner>/<repo>/releases/latest (Accept:
+  application/vnd.github.v3+json) → asset NAMED exactly "latest-mac.yml" →
+  download (< 64 KB guard) → parse. Any other provider WITH a plain url →
+  GET <url>/latest-mac.yml (HTTPS-only floor). Everything else (s3, custom,
+  no provider key, http url) → Pipeline B fallback, else honest nil.
+- latest-mac.yml → claim: version REQUIRED (never synthesized);
+  downloadURL = first usable files[].url — RELATIVE joins the yml origin's
+  directory, absolute wins; sha256Hex = nil ALWAYS (only SHA-512 exists
+  upstream; our installer verifies SHA-256 ⇒ info+manual by design — the
+  sourceDetail says so verbatim); minimumSystemVersion nil; releaseDate
+  ISO8601-first; releaseNotes = releaseName; confidence .medium.
+- Pipeline B (asar): header JSON → package.json → "main" (default
+  "index.js") → slice → Updatest's regexes
+  ( updateURL\s*[=:]\s*['"`]([^'"`]+)['"`] and
+    ['"`](https?://update\.electronjs\.org/[^'"`]+)['"`] )
+  → owner/repo = first two path segments after the host (any
+  {platform}/{version} suffix stripped by construction) → probe
+  https://update.electronjs.org/<owner>/<repo>/darwin-arm64/<installed
+  shortVersion ?? bundleVersion ?? "0.0.0"> → JSON {name, version, url?}
+  with version REQUIRED. Non-electronjs updateURL values and non-https
+  probe urls are refused by the LOCKED https floor (honest nil / nil url).
+- Failure semantics: every network/parse failure yields nil; the declared
+  `throws` is the frozen UpdateSource contract and this source never
+  rethrows (malformed URLs included — CaskSource-style honest nil).
+
+EMPIRICAL ASAR HEADER EVIDENCE (READ-ONLY probes of installed apps —
+nothing was written/modified; probes outside tests)
+--------------------------------------------------------------
+Real-bundle layout verified against /Applications/Claude.app/Contents/
+Resources/app.asar (64,068,475 bytes, Claude Desktop 4.29.0), first 16 bytes:
+
+  00000000  04 00 00 00 34 e0 02 00 30 e0 02 00 2a e0 02 00
+  00000010  7b 22 66 69 6c 65 73 22 3a ...   ← `{\"files\":...`
+
+  u32LE[0..4)   = 4                  (size-pickle payload constant)
+  u32LE[4..8)   = 0x2E034 = 188468   (H — header pickle buffer length)
+  u32LE[8..12)  = 0x2E030 = 188464   (S — header pickle PAYLOAD size)
+  u32LE[12..16) = 0x2E02A = 188458   (J — JSON header byte length)
+  JSON at [16 .. 16+J), zero padding to align4(J), THEN file data.
+
+  Cross-checks that all agree (both derivations of the data base):
+    align4(J)        = 188460
+    S  = 4 + align4(J)              = 188464 ✓ (matches byte [8..12))
+    H  = 4 + S                      = 188468 ✓ (matches byte [4..8))
+    data_base = 8 + H = 16 + align4(J) = 188476 ✓
+  Payload slice proof: header entry /package.json = {size 1121,
+  offset "47385950" (STRING — reader accepts String|Int)} → bytes at
+  data_base + 47385950 parse as package.json
+  {@ant/desktop, 4.29.0, main: ".vite/build/index.pre.js"}; the main file
+  (1,002,540 bytes) then slices cleanly at data_base + its own offset.
+  Conclusion: the real-world offsets AGREE with the public asar
+  spec assumption; the reader codes exactly the observed layout.
+- Header-offer shapes confirmed: offset stored as JSON string; directory
+  nodes = {"files":{…}}; "unpacked": true members carry size but NO
+  offset (Figma/Slack/Factory/1Password shapes) → readMember refuses
+  honestly (documented v1 skip; app.asar.unpacked/ companions unread).
+- Whole-archive FileHandle reads are avoided: bounded seek+read only.
+
+REAL app-update.yml PROVIDER MATRIX (read-only survey of /Applications,
+same day — recorded as fixture shape evidence):
+  provider: generic + url        Notion (desktop-release.notion-static.com),
+                                 Antigravity, ByteRover (GCS), Capy
+                                 (CloudFront), DeepSeek, Signal, ZCode
+                                 (http://localhost:8081 — proves the
+                                 https-floor refusal is load-bearing)
+  provider: github owner/repo    Orca (stablyai/orca), GooeyPi, Granola
+                                 (granola-inc/granola-electron), OpenHands,
+                                 Superset, T3 Code Nightly, Traycer,
+                                 VigilPC, Cube
+  provider: s3 (+bucket/endpoint, no url)   Bionic, BlueMail, Manus Studio
+  provider: custom (+endpoint/path, no url) Linear, Termius
+  NO provider key at all         Cue
+  asar WITHOUT app-update.yml    Claude, Figma, Slack, Factory, 1Password,
+  (pipeline-B candidates, some   Grok Bot, Hermes, Wispr Flow
+   with main resolving into
+   app.asar.unpacked or missing)
+
+LIVE net probes (read-only, one-shot, for fixture shape ground truth):
+  - https://d1lfowv2t69uz0.cloudfront.net/stable/latest-mac.yml (Capy)
+
+  → real latest-mac.yml shape pinned:
+      version: 0.6.0
+      files:
+        - url: Capy-0.6.0-x64.zip
+          sha512: …
+          size: 167158770
+        … 4 entries (x64 zip, x64 dmg, arm64 zip, arm64 dmg) …
+      path: Capy-0.6.0-x64.zip
+      sha512: …
+      releaseDate: '2026-10-27T20:29:20.738Z'
+    (quoted ISO-fractional releaseDate; document-order arch mix — the
+    first-entry downloadURL pick + arch limitation recorded below.)
+  - https://storage.googleapis.com/brv-releases/desktop/channels/stable/
+    latest-mac.yml → HTTP NoSuchKey (GCS layout differs) — evidence that
+    an honest 404 → Pipeline-B/nil path is REQUIRED, not theoretical.
+  - https://api.github.com/repos/stablyai/orca/releases/latest (UA
+    AppUpdater/0.1 (macOS), Accept vnd.github.v3+json) → HTTP 200; field
+    names pinned (tag_name, published_at, assets[].name,
+    assets[].browser_download_url, assets[].digest); NOTE its asset list
+    contained NO "latest-mac.yml" (draft releaseType: yml lives elsewhere)
+    — the no-yml-asset → Pipeline-B-fallback scenario is REAL, not invented.
+
+VERBATIM GATE OUTPUTS
+--------------------------------------------------------------
+$ swift build 2>&1 | tail -3
+    [27 / 28] appupdater-cli-product
+    [27 / 28] AppUpdaterApp-product
+    Build complete! (2.38 sec)
+
+$ swift test 2>&1 | tail -6        (THREE sequential runs, all identical count)
+    ◇ Test swapPreservesOldRootMtime() started.
+    ✔ Test swapPreservesOldRootMtime() passed after 0.022 seconds.
+    ◇ Test swapReleasesQuarantineWhenPresent() started.
+    ✔ Test swapReleasesQuarantineWhenPresent() passed after 0.098 seconds.
+    ✔ Suite DeployTests passed after 13.629 seconds.
+    ✔ Test run with 250 tests in 21 suites passed after 13.629 seconds.
+    (baseline 227 + this lane 23 = 250 — regressions: none, count grew only)
+    run #2: ✔ Test run with 250 tests in 21 suites passed after 15.596 seconds.
+    run #3: ✔ Test run with 250 tests in 21 suites passed after 15.017 seconds.
+
+$ swiftlint lint --quiet 2>&1 | grep -c ": error: "
+    0
+
+LIMITATIONS (honest, all also documented in source doc comments)
+--------------------------------------------------------------
+1. PLATFORM TEMPLATE (pipeline B): the electronjs probe is hardwired
+   darwin-arm64 (brief-locked emulated probe). Updatest scrapes per-arch
+   templates; probing darwin-x64 (or arm64-only apps on Intel) is deferred.
+2. YML ARCHIVE VARIANTS (pipeline A): only the base name latest-mac.yml is
+   fetched. latest-mac-arm64.yml / latest-mac-universal.yml / RELEASES.json
+   (the Updatest-documented family) are deliberately v1-skipped, as are
+   channel-specific compositions (Notion's yaml `channel: arm64` is parsed
+   but unused). Consequence: channel/arch staging of a release may be
+   missed → honest nil or an older-than-newest version claim.
+3. FIRST-ENTRY downloadURL pick: electron-builder lists x64+arm64+universal
+   artifacts in one files[] list; v1 takes the first usable entry and does
+   NOT arch-match against this Mac. Recorded for merge review — refine at
+   install-time when arch awareness lands (info+manual tier today).
+4. S3 / CUSTOM providers are NOT routed to their endpoint/bucket
+   composition (real shapes: Bionic s3, Linear/Termius custom) → Pipeline B
+   else honest nil. The s3 URL algebra is deferred (v1 scope per brief).
+5. UNPACKED asar members (app.asar.unpacked/) are skipped — the main script
+   of Figma/Slack/Factory/1Password is not readable through this v1 reader
+   → honest nil for those apps. GitHub-optional integration belongs to the
+   `.github` (engine-wired) story, NOT this lane.
+6. NO installed-version staleness gating (recorded consequence for merge
+   review, like SparkleSource's per-lane note): an equal-or-stale electron
+   release stays a claim. Rationale: the claim is "what the vendor
+   publishes" for an app that self-updates at launch — Updatest's framing —
+   and the engine's unknown-gating already places it LAST. If the
+   coordinator wants Sparkle-parity ("not newer ⇒ nil"), it is a two-line
+   addition in `claim(from:ymlOrigin:)` / `claimFromAsar` — flagged, not
+   preemptively applied (the brief pins the claim semantics verbatim).
+7. INTEGRATION (coordinator): wire `ElectronSource()` into the engine's
+   source array (AppState/UpdateCheckEngine cli/app init sites — see
+   UpdateCheckEngine docs; SourceKind .unknown → engine keeps it last and
+   VersionOracle surfaces the claim only when no stronger source exists).
+   The kind string surfaces as "unknown" in JSON reports (SourceKind
+   rawValue) — coordinator may want a friendlier report label later;
+   that is report/UX surface, not model enum, and stays theirs.
+8. updateURL pointing at NON-electronjs hosts is recorded-but-unrouted
+   (v1 = electronjs-hosted service only, per brief wording).
+
+SWIFTLINT / HOUSE RULES
+--------------------------------------------------------------
+- force_* = 0 (errors); force_unwrapping fix applied at
+  ElectronYaml.stripQuotes, long sourceDetail lines split into
+  claimDetail(provenance:integrityClause:) parts (byte-identical text).
+- Swift Testing only; #require used for optional unwrapping; zero network
+  asserted via recorded-request counts; unique temp root
+  (appupdater-electron-<UUID>) per process — ledger rules honored.
+
+FILE OWNERSHIP PROOF (git status --short at close)
+--------------------------------------------------------------
+?? Sources/AppUpdaterCore/UpdateSources/Electron/
+?? Tests/AppUpdaterCoreTests/ElectronSourceTests.swift
+(→ after commit: the three Source files + test file + this evidence file
+ONLY; no shared file touched. Package.swift, AppModels, engine: UNTOUCHED.)
