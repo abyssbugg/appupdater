@@ -1,0 +1,101 @@
+GAP-CLOSURE LANE EVIDENCE — custom-locations (gap #18, bookmark-backed scan roots)
+===================================================================================
+Worktree: /Users/datamatics/dev/appupdater/.worktrees/custom-locations
+Branch:   gap/custom-locations (from main)
+Date:     2026-10-27
+Scope:    Sources/AppUpdaterCore/Scan/ScanLocations.swift (new),
+          Sources/AppUpdaterApp/Views/LocationSettingsView.swift (new),
+          Tests/AppUpdaterCoreTests/ScanLocationTests.swift (new),
+          docs/evidence/gap-custom-locations-2026-10-27.txt (this file).
+
+AGENT (verbatim session outputs — commands run in the worktree)
+==============================================================================
+
+$ swift build 2>&1 | tail -3
+Building for debugging...
+[Using on-disk description]
+Build complete! (0.37 sec)
+
+$ swift test 2>&1 | tail -6
+◇ Test swapPreservesOldRootMtime() started.
+✔ Test swapPreservesOldRootMtime() passed after 0.091 seconds.
+◇ Test swapReleasesQuarantineWhenPresent() started.
+✔ Test swapReleasesQuarantineWhenPresent() passed after 0.034 seconds.
+✔ Suite DeployTests passed after 15.243 seconds.
+✔ Test run with 240 tests in 21 suites passed after 15.244 seconds.
+
+$ swiftlint lint --quiet 2>&1 | grep -c ": error: "
+0
+
+Test delta: main baseline 227 tests / 20 suites → 240 tests / 21 suites
+(= 227 + 13 new ScanLocationTests, +1 suite). No pre-existing test regressed.
+
+DESIGN DELIVERED (per brief — requirement §3.1 / gap #18)
+==============================================================================
+- ScanLocation (public struct: Codable, Hashable, Sendable, Identifiable):
+  `canonicalPath` is the dedupe identity AND the stable `id`;
+  `bookmarkData` is a security-scoped bookmark, nil when creation failed
+  (documented); `addedAt` is display metadata.
+- ScanLocationStore (final class, @unchecked Sendable + serial NSLock):
+  disk is the single source of truth (each verb re-reads scan_locations.json);
+  API = locations(), add(_:), remove(id:), resolvedRoots(), plus public
+  private(set) lastBookmarkWarning. Public init is a convenience
+  `ScanLocationStore(directory:)`; the bookmark producer is an internal seam
+  `init(directory:bookmarkDataForURL:)` (designated) so tests can drive the
+  tolerated-nil branch deterministically — a real macOS filesystem makes
+  bookmark creation succeed for every existing local folder, so without the
+  seam the tolerated branch would be untestable hermetically.
+- Persistence: scan_locations.json, JSONEncoder [.prettyPrinted, .sortedKeys],
+  shape {"schemaVersion": 1, "locations": [...]} sorted by canonicalPath.
+  Missing file → locations() == [] and NOTHING is created (lazy honesty, no
+  writes until the first mutation). Writes are atomic: staged bytes swapped
+  in via createFile + replaceItemAt/moveItem on the same volume. Corrupt or
+  unsupported-schema file → ScanLocationError with clean text, file bytes
+  NEVER modified or deleted (asserted byte-for-byte in tests).
+- LocationSettingsView (SQLite-free SwiftUI pane, LocationSettingsView(store:)):
+  loads rows with resolved dot-states (green resolve / red vanished), add +
+  remove wired to the store, lastBookmarkWarning surfaced verbatim, empty
+  state + network-volume hint copy pinned, public `onChange` seam for the
+  app's refresh hooks.
+
+HONEST NOTES (what is and is not exercised)
+==============================================================================
+- Bookmark resolution is bookmark-first with a canonical-path fallback: a
+  record whose bookmark data resolves is opened via the bookmark (works for
+  security-scoped/network volumes); if the bookmark cannot be resolved but
+  the recorded canonical path still exists, resolvedRoots() answers that
+  canonical URL. A vanished custom folder is listed with `url == nil` — the
+  UI renders it missing; it only leaves the list via remove(id:).
+- No network volumes were exercised in this lane (no such mount available):
+  the bookmark-first path and stale-bookmark regeneration semantics were
+  validated against local fixtures only. The stale-bookmark inout flag is
+  parsed and propagated, but a genuinely stale bookmark from a disconnected
+  volume was not produced on real hardware here — residual risk for the
+  coordinator's integration pass.
+- /Applications guard: tested by STAT ONLY (read-only
+ FileManager.fileExists existence check against the real /Applications); the
+  store was never pointed at a real /Applications mutation. Guard compares
+  case-insensitively (macOS default case-insensitive FS) and covers symlink
+  aliases, because identity is the canonical path.
+- SDK quirks found the hard way (recorded for the coordinator):
+  * URL.resolvingSymlinksInPath() KEEPS a trailing slash on "/"-terminated
+    inputs; identity comparisons need an explicit trailing-slash strip
+    (the store's canonicalPath(for:) + mirrored test helper). On this
+    toolchain the SDK does NOT rewrite /var/folders/… to /private/var/folders/….
+  * bookmarkDataIsStale is an `inout Bool` parameter in Swift (not an
+    ObjCBool pointer as in older bridges): resolve with
+    `URL(resolvingBookmarkData:options:relativeTo:bookmarkDataIsStale:)`
+    against a `var stale = false`.
+  * Swift Testing does not re-export Foundation; XCTest collects 0 tests on
+    this toolchain (gotcha ledger) — tests are Swift Testing only.
+- Lint gate is errors-only and is green (0 errors). `swiftlint lint --quiet`
+  reports repo-wide warnings, of which 3 are line_length on
+  ScanLocations.swift (lines 246/257/296 — long human-readable refusal
+  strings, the same house pattern as SparkleSourceTests / IntegrationTests /
+  ScheduleSettingsView). No file_length warnings remained after trimming
+  both new files to 398 lines.
+
+OWNERSHIP (git status at commit time)
+==============================================================================
+Only the four files above are touched by this lane; `git status --short`
+in the worktree shows exactly those untracked entries before commit.
