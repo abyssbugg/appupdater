@@ -15,18 +15,49 @@ import Foundation
 ///   is final (no fall-through)" rule: if cask (strongest source attempted) says the
 ///   install is current, a newer sparkle claim does NOT override it.
 /// - This engine performs NO writes and NO downloads. It only produces claims.
+/// - MANUAL-OVER-BUILTIN (owner-locked gap-sprint decision): when the optional
+///   `manualSource` resolver yields a source for an app, that pin is an owner
+///   attestation and that source is the ONLY one consulted for the app —
+///   built-ins are not queried (no surprise network traffic), the claim still
+///   passes the standard strictly-greater gate at resolve time, and a pinned
+///   source's throw is recorded verbatim in `failures`.
 public struct UpdateCheckEngine: Sendable {
     /// Sources in precedence order (sorted from `VersionOracle.sourcePrecedence`).
     public let sortedSources: [any UpdateSource]
 
+    /// Per-app manual pin seam (nil = no manual behavior; built-ins run as before).
+    public let manualSource: ManualSourceResolver?
+
     /// Build an engine. Sources are automatically sorted into precedence order;
     /// unknown-kind sources are kept last (still attempted, winners recorded honestly).
-    public init(sources: [any UpdateSource]) {
+    public init(sources: [any UpdateSource], manualSource: ManualSourceResolver? = nil) {
         let precedence = VersionOracle.sourcePrecedence
         let rank: (SourceKind) -> Int = { kind in
             precedence.firstIndex(of: kind) ?? precedence.count
         }
         self.sortedSources = sources.sorted { rank($0.kindValue) < rank($1.kindValue) }
+        self.manualSource = manualSource
+    }
+
+    /// Run one source for one app, appending its claim (or verbatim failure).
+    private func attempt(
+        _ source: any UpdateSource,
+        app: InstalledApp,
+        into candidates: inout [UpdateInfo],
+        failures: inout [CheckSourceFailure]
+    ) async {
+        do {
+            if let info = try await source.fetchUpdateInfo(for: app) {
+                candidates.append(info)
+            }
+        } catch {
+            failures.append(
+                CheckSourceFailure(
+                    kind: source.kindValue,
+                    message: String(describing: error)
+                )
+            )
+        }
     }
 
     /// Run every source for one app and resolve a verdict. Network errors are captured,
@@ -35,18 +66,13 @@ public struct UpdateCheckEngine: Sendable {
         var candidates: [UpdateInfo] = []
         var failures: [CheckSourceFailure] = []
 
-        for source in sortedSources {
-            do {
-                if let info = try await source.fetchUpdateInfo(for: app) {
-                    candidates.append(info)
-                }
-            } catch {
-                failures.append(
-                    CheckSourceFailure(
-                        kind: source.kindValue,
-                        message: String(describing: error)
-                    )
-                )
+        if let manualSource, let pinned = await manualSource.resolve(app) {
+            // Manual pin: the pinned source is the ONLY source consulted for
+            // this app (see header policy). Built-ins stay silent.
+            await attempt(pinned, app: app, into: &candidates, failures: &failures)
+        } else {
+            for source in sortedSources {
+                await attempt(source, app: app, into: &candidates, failures: &failures)
             }
         }
 
@@ -79,6 +105,26 @@ public struct UpdateCheckEngine: Sendable {
         return landing.enumerated().map { index, check in
             check ?? UpdateCheck(app: apps[index], candidates: [], failures: [], resolved: nil)
         }
+    }
+}
+
+// MARK: - Manual-source resolver seam
+
+/// Per-app manual source pin seam (coordinator-owned; the manual-sources wave
+/// plugs its store in here). Given one app, yield the ONE `UpdateSource` that
+/// must exclusively be consulted for it, or nil when the app has no pin.
+///
+/// Semantics (owner-locked manual-over-builtin): a pin is an owner attestation
+/// — the engine runs ONLY the pinned source for that app (built-ins are never
+/// queried for it), and the resulting claim still goes through the standard
+/// strictly-greater comparison at resolve time, so pinning never manufactures
+/// an update that the installed version refutes.
+public struct ManualSourceResolver: Sendable {
+    public typealias Resolve = @Sendable (InstalledApp) async -> (any UpdateSource)?
+    public let resolve: Resolve
+
+    public init(_ resolve: @escaping Resolve) {
+        self.resolve = resolve
     }
 }
 

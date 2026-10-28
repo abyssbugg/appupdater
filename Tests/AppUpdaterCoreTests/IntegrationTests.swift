@@ -409,4 +409,120 @@ struct IntegrationTests {
         #expect(check.resolved?.source == .cask)
         #expect(check.verdict == "update")
     }
+
+    // MARK: Manual-source pin seam (manual-over-builtin, gap sprint)
+
+    /// Hit counter shared with the fake sources (probe sematics only).
+    private actor ManualPinProbeCounter {
+        var hits = 0
+        func hit() { hits += 1 }
+        func value() -> Int { hits }
+    }
+
+    /// Fake built-in (.cask) with a claim the pin must NOT compete against.
+    private struct ManualPinBuiltinSource: UpdateSource {
+        static var kind: SourceKind { .cask }
+        var counter: ManualPinProbeCounter
+        var claim: UpdateInfo?
+        func fetchUpdateInfo(for app: InstalledApp) async throws -> UpdateInfo? {
+            await counter.hit()
+            return claim
+        }
+    }
+
+    /// Fake pinned source (.github) — inserts a claim or throws.
+    private struct ManualPinStubSource: UpdateSource {
+        static var kind: SourceKind { .github }
+        var counter: ManualPinProbeCounter
+        var claim: UpdateInfo?
+        func fetchUpdateInfo(for app: InstalledApp) async throws -> UpdateInfo? {
+            await counter.hit()
+            return claim
+        }
+    }
+
+    /// Fake pinned source that throws verbatim.
+    private struct ManualPinThrowSource: UpdateSource {
+        static var kind: SourceKind { .github }
+        var counter: ManualPinProbeCounter
+        func fetchUpdateInfo(for app: InstalledApp) async throws -> UpdateInfo? {
+            await counter.hit()
+            throw URLError(.timedOut)
+        }
+    }
+
+    @Test func manualPinSuppressesBuiltinsAndWinsVerdict() async {
+        let builtin = ManualPinProbeCounter()
+        let pinned = ManualPinProbeCounter()
+        let engine = UpdateCheckEngine(
+            sources: [ManualPinBuiltinSource(counter: builtin, claim: UpdateInfo(source: .cask, newestShortVersion: "9.9"))],
+            manualSource: ManualSourceResolver { _ in
+                ManualPinStubSource(counter: pinned, claim: UpdateInfo(source: .github, newestShortVersion: "2.0"))
+            }
+        )
+        let app = InstalledApp(bundleIdentifier: "io.test.pin", name: "ManualApp", path: "/tmp/ManualPin.app", shortVersion: "1.0")
+        let check = await engine.check(app: app)
+
+        // The builtin's 9.9 claim would beat 2.0 on any consulted path — the
+        // fact that `.github`/2.0 wins proves the builtin was never queried.
+        #expect(check.resolved?.source == .github)
+        #expect(check.resolved?.newestShortVersion == "2.0")
+        #expect(check.candidates.map { $0.source } == [.github])
+        #expect(await pinned.value() == 1)
+        #expect(await builtin.value() == 0)
+        #expect(check.verdict == "update")
+    }
+
+    @Test func manualPinEqualVersionIsCurrentNotUpdate() async {
+        let pinned = ManualPinProbeCounter()
+        let engine = UpdateCheckEngine(
+            sources: [],
+            manualSource: ManualSourceResolver { _ in
+                ManualPinStubSource(counter: pinned, claim: UpdateInfo(source: .github, newestShortVersion: "1.0"))
+            }
+        )
+        let app = InstalledApp(bundleIdentifier: "io.test.pin.eq", name: "ManualApp", path: "/tmp/ManualPin.app", shortVersion: "1.0")
+        let check = await engine.check(app: app)
+
+        // A pin never manufactures an update the installed version refutes:
+        // strictly-greater gate still applies at resolve time.
+        #expect(check.resolved == nil)
+        #expect(check.candidates.count == 1)
+        #expect(check.failures.isEmpty)
+        #expect(check.verdict == "current")
+    }
+
+    @Test func manualPinAbsentYieldsBuiltinsUnchanged() async {
+        let builtin = ManualPinProbeCounter()
+        let engine = UpdateCheckEngine(
+            sources: [ManualPinBuiltinSource(counter: builtin, claim: UpdateInfo(source: .cask, newestShortVersion: "2.0"))],
+            manualSource: ManualSourceResolver { _ in nil }
+        )
+        let app = InstalledApp(bundleIdentifier: "io.test.pin.nil", name: "ManualApp", path: "/tmp/ManualPin.app", shortVersion: "1.0")
+        let check = await engine.check(app: app)
+
+        #expect(check.resolved?.source == .cask)
+        #expect(await builtin.value() == 1)
+        #expect(check.verdict == "update")
+    }
+
+    @Test func manualPinThrowIsVerbatimFailureWithNoBuiltinFallback() async {
+        let builtin = ManualPinProbeCounter()
+        let pinned = ManualPinProbeCounter()
+        let engine = UpdateCheckEngine(
+            sources: [ManualPinBuiltinSource(counter: builtin, claim: UpdateInfo(source: .cask, newestShortVersion: "9.9"))],
+            manualSource: ManualSourceResolver { _ in ManualPinThrowSource(counter: pinned) }
+        )
+        let app = InstalledApp(bundleIdentifier: "io.test.pin.throw", name: "ManualApp", path: "/tmp/ManualPin.app", shortVersion: "1.0")
+        let check = await engine.check(app: app)
+
+        // Honesty: the pin failed loudly and the engine does NOT silently fall
+        // back to built-ins for a pinned app (the owner's attestation stands).
+        #expect(check.failures.count == 1)
+        #expect(check.failures.first?.kind == .github)
+        #expect(check.candidates.isEmpty)
+        #expect(await pinned.value() == 1)
+        #expect(await builtin.value() == 0)
+        #expect(check.verdict == "failed")
+    }
 }
