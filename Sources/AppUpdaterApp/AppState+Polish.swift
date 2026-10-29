@@ -52,6 +52,10 @@ extension AppState {
     /// (the only reliable moment for an LSUIElement app's policy decision).
     /// Also clears any stale badge — a fresh launch has no rows yet.
     func applyLaunchDisplayState(_ settings: DisplaySettings) {
+        // NSApp is nil during AppState.init (the scene creates NSApplication
+        // later) — materialize it first or the implicit unwrap traps SIGTRAP
+        // and the app dies silently right after launch (found live).
+        _ = NSApplication.shared
         NSApp.setActivationPolicy(settings.showInDock ? .regular : .accessory)
         NSApp.dockTile.badgeLabel = nil
     }
