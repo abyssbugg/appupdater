@@ -134,7 +134,9 @@ final class AppState: ObservableObject {
 
     /// Shared Application-Support home of the disk-backed stores (whole-index
     /// cask cache + custom scan locations). Tests inject an isolated dir.
-    private let appSupportDirectory: URL
+    /// Internal (was private) so the glue-wiring model can point the brew
+    /// formula-index store at the same home — one path, one source of truth.
+    let appSupportDirectory: URL
 
     /// Custom scan-location store (gap #18). /Applications is ALWAYS scanned;
     /// these directories add to it. AppState only READS it — the settings
@@ -154,6 +156,8 @@ final class AppState: ObservableObject {
 
     /// Builds the engine's per-app manual-source seam from the shared store.
     private let manualSourceResolver: ManualSourceResolverService
+
+    let proxySession = ProxySessionController()  // glue-wiring: engines' sources adopt this proxied session (see ProxySession.swift)
 
     /// The real Application-Support home (the CLI uses the same path).
     private static let defaultAppSupportDirectory = FileManager.default
@@ -275,7 +279,7 @@ final class AppState: ObservableObject {
         self.scheduleStore = ScheduleFileStore(directory: scheduleDirectory)
         self.scanDirectories = scanDirectories
         self.scanLocationStore = ScanLocationStore(directory: support)
-        self.caskIndexStore = CaskIndexStore(directory: support)
+        self.caskIndexStore = CaskIndexStore(directory: support, session: proxySession.session)
         self.manualSourceStore = ManualSourceStore(directory: support)
         self.manualSourceResolver = ManualSourceResolverService(store: manualSourceStore)
 
@@ -424,7 +428,7 @@ final class AppState: ObservableObject {
             let checks = await UpdateCheckEngine(
                 sources: await checkSources(),
                 manualSource: manualSourceResolver.engineResolver(
-                    session: .shared, githubCacheDirectory: appSupportDirectory),
+                    session: proxySession.session, githubCacheDirectory: appSupportDirectory),
                 feedDerivation: FeedDerivationResolver { app in
                     SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
                 }
@@ -437,7 +441,7 @@ final class AppState: ObservableObject {
             // Decision-14: after checks + rules, the opt-in auto-apply pass
             // runs (master OFF by default → this reads one settings file and
             // returns; opted-in apps are gated, applied, and receipted).
-            await runAutoApplyPass(evaluated: evaluated)
+            lastAutoApplyReceipt = await runAutoApplyPass(evaluated: evaluated)
             return targets.count
         }
         lastApps = apps
@@ -499,11 +503,11 @@ final class AppState: ObservableObject {
         if indexUsable {
             sources.append(CaskIndexSource(store: caskIndexStore))
         } else {
-            sources.append(CaskSource())
+            sources.append(CaskSource(session: proxySession.session))
         }
         sources.append(SparkleSource())
-        sources.append(MASSource())
-        sources.append(GithubSource(directory: appSupportDirectory, session: .shared))
+        sources.append(MASSource(session: proxySession.session))
+        sources.append(GithubSource(directory: appSupportDirectory, session: proxySession.session))
         sources.append(ElectronSource())
         return sources
     }
@@ -792,110 +796,23 @@ final class AppState: ObservableObject {
     /// evaluation → rows. Runs on Check Now (menu + window) and behind the
     /// VM's refresh seam.
     ///
-    /// NOTIFICATION BOUNDARY (LOCKED, scheduled-fires-only): this path
-    /// NEVER posts the distributed fire event, never advances
-    /// ``lastScheduledPendingNames`` and never advises the local
-    /// Decision-14 auto-apply: the latest pass's verbatim receipt (nil = the
-    /// pass never ran — the master switch defaults OFF). UI surfaces read
-    /// this; nothing here is hidden.
+    /// NOTIFICATION BOUNDARY (LOCKED, scheduled-fires-only): this path NEVER
+    /// posts the distributed fire event, never advances
+    /// ``lastScheduledPendingNames`` and never advises the local notification
+    /// decider — a manual nudge must never fake a schedule event or tune the
+    /// scheduled-fire baseline. Decision-14 auto-apply: the latest pass's
+    /// verbatim receipt (nil = the pass never ran — the master switch defaults
+    /// OFF). UI surfaces read this; nothing here is hidden.
     @Published private(set) var lastAutoApplyReceipt: AutoApplyRunReceipt?
 
     /// Decision-14 settings store (global master switch + per-app opt-ins).
-    private let autoApplySettingsStore = AutoApplySettingsStore()
+    let autoApplySettingsStore = AutoApplySettingsStore()
 
-        /// notification decider — a manual nudge must never fake a schedule
-    /// event or tune the scheduled-fire baseline.
-    // MARK: Decision-14 auto-apply (opt-in per-app, user-space only)
-
-    /// The amended consent boundary in code (LOCKED decision 14): the master
-    /// switch defaults OFF and per-app opt-in defaults OFF — with both off
-    /// (the shipped state) this pass reads one settings file and returns.
-    /// Gate-cleared apps run the SAME verified chain the CLI --apply uses
-    /// (backup → quit → swap → postScan, receipts verbatim); the gate refuses
-    /// pkg/vendor/MAS/ignored artifacts before any planning, so the
-    /// privileged staged-command path is unreachable from here by
-    /// construction. Serialized on purpose (installs are heavy); relaunch is
-    /// NEVER automatic — the receipt notes the app was swapped and closed.
-    private func runAutoApplyPass(evaluated: [AppRow]) async {
-        let settings = (try? await autoApplySettingsStore.load()) ?? AutoApplySettings()
-        guard settings.autoApplyEnabled else { return }   // master OFF: zero work
-        let engineProbe = ScheduleEngine(fire: { _ in 0 })
-        let onBattery = engineProbe.isOnBattery()
-        let isOnline = engineProbe.isOnline()
-        let running = Set(
-            NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier })
-        let planner = InstallPlanner()
-        let fm = FileManager.default
-        let stagingRoot = appSupportDirectory.appendingPathComponent("staging", isDirectory: true)
-        let backupsRoot = appSupportDirectory.appendingPathComponent("backups", isDirectory: true)
-        try? fm.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
-        try? fm.createDirectory(at: backupsRoot, withIntermediateDirectories: true)
-
-        let passStartedAt = Date()
-        var outcomes: [AutoApplyOutcome] = []
-        for row in evaluated {
-            guard let check = row.check else { continue }
-            let input = AutoApplyGateInput(
-                app: row.app,
-                check: check,
-                autoApplyEnabled: settings.autoApplyEnabled,
-                perAppOptIn: settings.isOptedIn(bundleIdentifier: row.app.bundleIdentifier),
-                policy: schedule.policy,
-                onBattery: onBattery,
-                isOnline: isOnline,
-                runningBundleIdentifiers: running,
-                ruleDecision: row.decision)
-            let decidedAt = Date()
-            switch AutoApplyGate.decide(input) {
-            case .skip(let skip):
-                outcomes.append(AutoApplyOutcome(
-                    app: row.app, decidedAt: decidedAt, decision: .skip(skip)))
-            case .apply:
-                guard let update = check.resolved else { continue }
-                do {
-                    let plan = try planner.plan(app: row.app, update: update)
-                    let installOutcome = try await InstallCoordinator().run(
-                        plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot,
-                        relaunchRequested: false)
-                    outcomes.append(AutoApplyOutcome(
-                        app: row.app, decidedAt: decidedAt, decision: .apply,
-                        installOutcome: installOutcome))
-                } catch {
-                    // Planning/apply failure = an honest receipt, never a crash
-                    // and never a silent skip (decision .apply with the note).
-                    outcomes.append(AutoApplyOutcome(
-                        app: row.app, decidedAt: decidedAt, decision: .apply,
-                        installOutcome: nil, planningNote: String(describing: error)))
-                }
-            }
-        }
-        lastAutoApplyReceipt = AutoApplyRunReceipt(
-            startedAt: passStartedAt, finishedAt: Date(), outcomes: outcomes)
-    }
-
-    // MARK: Terminal typing (GAP #25 wiring — per-use consent)
-
-    /// Runs a staged owner-command in the owner's default terminal via the
-    /// Terminal-typing module. THE CLICK IS THE CONSENT
-    /// (`userApprovedTyping: true` — nothing types without a deliberate
-    /// button press; CopyPaste remains the default surface). The script runs
-    /// via NSAppleScript; the first use triggers macOS's automation
-    /// permission prompt (Terminal/iTerm2), which the owner approves or
-    /// denies — both honest outcomes. Errors surface verbatim in the
-    /// action banner.
+    /// The per-use consent surface: the click delegates to the Decision-14
+    /// extension and any refusal/failure lands verbatim in the action banner.
     func typeStagedCommandInTerminal(_ command: String) {
-        do {
-            let store = TerminalEmulatorStore(directory: appSupportDirectory)
-            let emulator = (try store.loadDefault()) ?? .terminal
-            let script = try TerminalScriptBuilder.typingScript(
-                command: command, emulator: emulator, userApprovedTyping: true)
-            var errorInfo: NSDictionary?
-            NSAppleScript(source: script)?.executeAndReturnError(&errorInfo)
-            if let errorInfo {
-                actionError = "Terminal automation failed: \(errorInfo)"
-            }
-        } catch {
-            actionError = "Terminal automation refused: \(error)"
+        if let error = terminalTypingError(for: command) {
+            actionError = error
         }
     }
 
@@ -904,7 +821,7 @@ final class AppState: ObservableObject {
         let checks = await UpdateCheckEngine(
             sources: await checkSources(),
             manualSource: manualSourceResolver.engineResolver(
-                session: .shared, githubCacheDirectory: appSupportDirectory),
+                session: proxySession.session, githubCacheDirectory: appSupportDirectory),
             feedDerivation: FeedDerivationResolver { app in
                 SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
             }

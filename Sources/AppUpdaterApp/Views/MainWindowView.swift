@@ -82,10 +82,16 @@ struct AppIconView: View {
 
 struct MainWindowView: View {
     @EnvironmentObject private var appState: AppState
+    // Glue-wiring: the security/brew/proxy panels' model (injected by the
+    // scene; re-injected into the inspector content below, matching the
+    // appState pattern the inspector needed).
+    @EnvironmentObject private var glue: GluePanelsModel
 
     @State private var showSettingsSheet = false
     @State private var showLocationsSheet = false
     @State private var showManualSheet = false
+    @State private var showBrewSheet = false
+    @State private var showProxySheet = false
     @State private var errorDismissed = false
     @State private var isRefreshing = false
 
@@ -105,6 +111,7 @@ struct MainWindowView: View {
             if let row = selectedRow {
                 DetailInspector(row: row)
                     .environmentObject(appState)
+                    .environmentObject(glue)
                     .inspectorColumnWidth(min: 300, ideal: 330, max: 380)
             }
         }
@@ -123,6 +130,12 @@ struct MainWindowView: View {
         .sheet(isPresented: $showManualSheet) {
             ManualSourceHost()
                 .frame(minWidth: 470, minHeight: 380)
+        }
+        .sheet(isPresented: $showBrewSheet) {
+            BrewPinsSheet(onClose: { showBrewSheet = false })
+        }
+        .sheet(isPresented: $showProxySheet) {
+            ProxySettingsSheet(onClose: { showProxySheet = false })
         }
         .onChange(of: list.lastError) { _, _ in errorDismissed = false }
         .onAppear {
@@ -197,6 +210,20 @@ struct MainWindowView: View {
                 Image(systemName: "pin")
             }
             .help("Manual source pins")
+
+            Button {
+                showBrewSheet = true
+            } label: {
+                Image(systemName: "pin.square")
+            }
+            .help("Homebrew pins & doctor")
+
+            Button {
+                showProxySheet = true
+            } label: {
+                Image(systemName: "network.badge.shield.half.filled")
+            }
+            .help("Proxy settings & system picture")
         }
     }
 
@@ -557,6 +584,7 @@ private struct DetailInspector: View {
                 if row.app.isMacAppStore {
                     storeNotice
                 }
+                SecurityPanelSection(row: row)
                 installCard
                 rulesCard
                 metaCard
