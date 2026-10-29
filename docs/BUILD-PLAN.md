@@ -202,6 +202,20 @@ Three lanes + coordinator integrations; union end-state **786 tests / 67 suites,
   relaunch display mode, exactly-once welcome tour (live-proven shown-once), SettingsMigration v1
   (identity, registry pattern, proven on the real machine); AppState split for lint discipline.
 
+## Phase 9 addendum — glue wiring + dormant helper — ✅ DONE 2026-10-29
+
+- **helper-dormant** `0ea737f` (owner signed §6): HelperProtocol (versioned Codable IPC contract),
+  HelperInstallService (launchd/SMAppService plan as DATA — ServiceManagement never imported),
+  HelperActivationGate (fail-closed: Developer-ID main app + Developer-ID helper + two consent
+  switches, all default OFF). 43 tests / 3 suites. CI verbatim 829/70.
+- **glue-wiring** (dead OpenCode lane finished in place): all five wave engines surfaced in app
+  (SecurityPanelCard, ProxySession + ProxySettingsSheet, BrewPinsSheet, GluePanels) and CLI
+  (`security`, `brew-pins`, `brew-doctor`, `brew-index`, `proxy show`); dead parallel draft
+  GlueModes.swift removed; parseCli + glue runners extracted (lint). 10 tests / 1 suite.
+- Union: **839 tests / 71 suites, swiftlint 0**; CI green (`7c0c9f1`). BACKLOG EMPTY of buildable
+  items; deferred-by-design only: helper ACTIVATION (Developer ID + owner activation), crowd data,
+  APNs, notarization (enrollment).
+
 Remaining backlog: **dormant helper build ONLY** (auth-touching; frozen pending owner signature on
 `docs/threat-model/PRIVILEGED-HELPER-REVIEW.md`). Crowd data + APNs: structural no-gos (no server).
 
