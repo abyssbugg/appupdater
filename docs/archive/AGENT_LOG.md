@@ -5,6 +5,30 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-29 — LOCAL-ONLY violation found + fixed (coordinator audit); owner purge decision pending
+
+**Confirmed (repo state, public remote):** owner asked for a full review of the inherited
+wave-2/3 work. The audit found `docs/reverse/` (GAP-ANALYSIS.md, MACUPDATER-FINDINGS.md,
+UPDATEST-FINDINGS.md — LOCAL-ONLY per owner decision, per their own headers) TRACKED in git
+and pushed to the PUBLIC repo (github.com/abyssbugg/appupdater, HTTP 200 verified). Exactly
+one commit touches the path: `4507c4a` (Tier-2 notify-actions integration, 2026-10-27). The
+violation survived five gate cycles because the gate checked tests/lint/CI only — it never
+checked `git ls-files` for local-only paths.
+
+**Fix shipped (`ba953a2`):** `git rm -r --cached docs/reverse` + `docs/reverse/` rule in
+.gitignore (accidental re-add now impossible without `git add -f`); all three files remain
+on disk, untouched. Gate after fix: **786 tests / 67 suites passed, swiftlint 0 errors.**
+
+**Honest limit (owner decision pending):** untracking removes FUTURE exposure only — the
+three files remain in git history on the remote, reachable by SHA (GitHub also caches
+deleted-commit views; clones/forks are unrecoverable). Full purge = `git filter-repo` +
+force-push; would rewrite every descendant hash (~35 commits) cited across
+BUILD-PLAN/AGENTS/AGENT_LOG. Related exposure, flagged for the same decision:
+`docs/MACUPDATER-BREAKDOWN.md` (committed by design since day one as a deliverable) also
+contains MacUpdater internals — same exposure class, different lock scope.
+
+---
+
 ## 2026-10-28 — Staged-PKG owner command SHIPPED (GAP #11 staging half, `94bfd25`)
 
 **Confirmed (gate + hermetic tests):** staged-PKG v1 landed in one commit — `InstallKind.pkg`
