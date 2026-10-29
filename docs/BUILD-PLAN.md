@@ -178,6 +178,27 @@ before re-dispatch AND verify no prior dispatch of the same lane is still alive.
 
 Union end-state: **446 tests / 34 suites, swiftlint 0 errors.** Evidence: `docs/evidence/tier2-*.json`.
 
+## Phase 9 — Hybrid completion wave (decision-14 surfaces) — ✅ DONE 2026-10-28
+
+Three lanes + coordinator integrations; union end-state **786 tests / 67 suites, swiftlint 0**; CI green per push.
+- **autoapply** `c42866f` + wiring `a711637`: AutoApplyGate — 12-reason fail-closed exclusion matrix
+  (consent → boundary → directives → claim validity → artifact safety → transient environment),
+  user-space-only enforcement (pkg unreachable by construction), opt-in defaults everywhere,
+  serialized runs, verbatim receipts (+additive planningNote). Wired into scheduledFire.
+- **terminal** `6ad08c2` + wiring `a018e9a`/`a711637`: Terminal.app/iTerm2 AppleScript builders
+  (dialect provenance labeled; adversarial quoting matrix; control-scalar refusal), per-use consent
+  click layer via NSAppleScript; CopyPaste remains the default.
+- **vendor-rules** `bf99923` + merge `cc18730`: vendor-installer staging (`open`, shell-escaped,
+  owner-attended) + poll-based post-install watch (typed appeared/timedOut/probeFailed); EdDSA-signed
+  file-based rule packs (canonical bytes pinned, strict envelope, typed refusals — MacUpdater's
+  container concept on our crypto).
+- **polish** `8772e8d` + merge `1bbf53f`: dock badge (observation-tracked pending count) + honest
+  relaunch display mode, exactly-once welcome tour (live-proven shown-once), SettingsMigration v1
+  (identity, registry pattern, proven on the real machine); AppState split for lint discipline.
+
+Remaining backlog: **dormant helper build ONLY** (auth-touching; frozen pending owner signature on
+`docs/threat-model/PRIVILEGED-HELPER-REVIEW.md`). Crowd data + APNs: structural no-gos (no server).
+
 ## Phase 8 — Competitor gap closure (GAP-ANALYSIS Tier 1) — ✅ DONE 2026-10-27
 Gate: 352 tests / 27 suites + swiftlint 0 errors in main after EVERY merge; live-network
 evidence per gap in `docs/evidence/gap-sprint-2026-10-27.txt`. Method: six lane worktrees +
