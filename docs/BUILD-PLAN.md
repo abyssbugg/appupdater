@@ -3,6 +3,12 @@
 > Phase-gated per CLAUDE.md §5: phases sequential + verified; lanes within a phase parallel
 > (git worktrees + subagents, non-overlapping file ownership). Every phase ends when its gate
 > has live evidence, then commits + pushes to `origin/main` or a PR.
+>
+> **2026-10-29 history purge (owner-directed):** `docs/reverse/` was stripped from ALL git
+> history (it had been wrongly committed in `4507c4a` and pushed to the public repo). Commit
+> hashes at/below the purge point changed; commit MESSAGES were auto-updated by filter-repo,
+> but hash citations in THESE docs still name pre-purge hashes — resolve them through
+> `docs/HISTORY-PURGE-MAP.md`.
 
 Target toolchain (LOCKED): Swift 6.4, Xcode 27-beta, SwiftPM, Sparkle 2 (self-update only),
 SwiftUI window + AppKit menu-bar shell, **deployment target macOS 15.0**.

@@ -1,0 +1,51 @@
+# History purge map — 2026-10-29
+
+Owner-directed purge: `git filter-repo --path docs/reverse --invert-paths` on a fresh
+mirror clone, force-pushed to origin (main + tag v0.1.0 + ci/macos-fix; refs/pull/1/head
+was clean and is GitHub-managed — untouched). Purpose: remove the LOCAL-ONLY teardowns
+(docs/reverse/) from ALL git history after commit 4507c4a had committed them to the
+public repo (untracked forward same day in ba953a2 — see AGENT_LOG 2026-10-29).
+
+filter-repo auto-updated commit MESSAGES that cited old hashes; it does NOT touch file
+contents — so hash citations inside docs/*.md still name PRE-PURGE hashes. Resolve any
+old hash through this table (docs cite the short form; match by prefix).
+
+34 commits rewritten; everything earlier than 014df92 kept its original hash.
+Commit messages that cited a rewritten hash were auto-updated to the new one.
+
+| old (pre-purge) | new (post-purge) |
+|---|---|
+| 014df92592b075315c2414b9cd7dfc13e3d57fe8 | b2952017acf541071837454e68ee4b01bd0a92a2 |
+| 0da47d190def1a1b5bd9319f4f702dc8674c5e15 | e596362a52523aa70295397ea9bee4e2051f4539 |
+| 102c23fe4d0a7d5f7b13034d46b16a5902a7b84a | 51525a7d8d434f1454ba8abc5bbb287bd2cdeda4 |
+| 11b55cb231447bce27f9841670511ec01988fab6 | a2f55aa79f29b780b0b74ddfee547ab40ce1772f |
+| 12f9e1f026178a4f0a529c93cee7ef62b72f3aa6 | c6d01decd5cad85b370d2e401eccbb26ed4eb6d4 |
+| 1bbf53f677a447b423a0b06026bbe4e2265064bf | ecdb54907b806970e6404df343b6600ac8ebcbef |
+| 24fcecd2719b03de0cae31414c934ed3661dd22c | 403f26b423bb7c39666415ab24cfdc157c2159d1 |
+| 25443a2a89ad40f6d9423d81f585f2610c82b6d6 | 8ca7ab42bf87465ed7080b49ad105b4e41b60b88 |
+| 281fa8bf7d98906f081c6e3177c9968b2ac0f606 | 58a0f0e1d00df287a9f0ec52ebd7dd484bcc7d39 |
+| 361c68a887186cfbc43ed339f75edb27485fa84e | f97b352ae26441994ff30951a6f5506b3822b0f2 |
+| 43016bbdf99b8058a597abac42ca3c2647099d83 | b4115a7b18d36888562bc724bcaaeb40ccc5433b |
+| 4507c4a6244cf29ae2e4bf1037a214c7e7395024 | 08f86832da6d2635322c4340080e34bd4422e23d |
+| 47551b1bd7d03a99af7ea2164145947dc93ccb86 | 7730536967e08ae97d52c1fe780322f1c907dac4 |
+| 4e177fd762cf04113a52014e701f5f261a4927f4 | dc1cb254aeff465324c1d3d0be2f5247b8596cfd |
+| 611372d3bc2f7af46c4ad3be69c493f6c2d99227 | 8fbe52e65583e2fec74541d34a2a22fff5b1f9a9 |
+| 6481dbaefce4f18714bad93e133feecb877e56cd | 0b96ed7c1f7d085cd2ee07b738c51ccd5438f5d5 |
+| 6ad08c20a571a12eb2f6e8f7964c551c7e77ba02 | 5d7cba202aa4723586ccffa8d588dff7143b065e |
+| 75a0fedc83359e2b6329cc334164ac8fe436f3d3 | a37b7a2aa229e3033b29ac595dc6a2163fc920db |
+| 7cb1970b5dd17c32fc8d602d114570fd6a7afc66 | 86f8133a7f1caa138891995ef61cf150474515d8 |
+| 7f82a8edae7cea0200cb3e3b9d10e35aed485de0 | b9d4085414c48b6a8113b0b48408a99f02d817c9 |
+| 8438dbd09ffd682145f47a7d233bc3fae10e7c73 | ddfa0c1c3946a80901c7fa35a1b58695157cc5f3 |
+| 8772e8d820bc5823a7b75ad7ed36fb44f7d5e71a | ee5396e61c16f3f5c8b1c945882e0afc449313af |
+| 8ca6ca9e7ceb3911bb4ca2972f0a227d6d5eb974 | 055bde28c1aaf70d4c53235a78fd17401852b87a |
+| 9f8f3a89bc7ff0f9db941802724367f8c173776c | 91bdbb2965159bd138e4075a53708f52d3932a1a |
+| a018e9a27a847163d0cffa620feb89fb35b1bab8 | 3102572f52b191e8056654e0cd8e2452fb84d561 |
+| a711637bceae3b8602c25f0575690717bb31be7d | 1d9378dc038a92aa331883d886370c27209f5297 |
+| ba953a275d08f4d1d3f94a5ea7c93536349039be | d988525af3cdc7a9604f0af25eda0e8959e9ed8c |
+| badd914f357507364b2124305302b71fbb50271e | b159976bdd7bda97aa77ed8478122d03e8564c98 |
+| bf99923bc62c81858645efd0f481617ac67d1547 | fa891337e80c1da9e61bd842f88193e0949b4ed0 |
+| c42866fd9a2804f63787db33e652704176f04309 | b916d9029380d35f43677e348fcb2ffe39145b0b |
+| c94afc4754b856588060ba5872fead36f5ba387d | 754bf4d1ba569394295165be536228fe0791d7f3 |
+| cc1873086f751589957c0021e486a616c03da357 | 92d219fe4f0c039dbb402fccbf8639ab347640f4 |
+| e9ef369edff85ce17f21e4c525ec749c18867646 | c40b67ae27d899200f9dbef5e7595a321ecb0008 |
+| ff44d0e63a537aa7277188b5c22c5f8dc702fbb9 | 182a8239927dc17da9fb4b3282fb6a8817824f31 |

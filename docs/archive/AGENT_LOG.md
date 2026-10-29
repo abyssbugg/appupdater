@@ -19,11 +19,16 @@ checked `git ls-files` for local-only paths.
 .gitignore (accidental re-add now impossible without `git add -f`); all three files remain
 on disk, untouched. Gate after fix: **786 tests / 67 suites passed, swiftlint 0 errors.**
 
-**Honest limit (owner decision pending):** untracking removes FUTURE exposure only — the
-three files remain in git history on the remote, reachable by SHA (GitHub also caches
-deleted-commit views; clones/forks are unrecoverable). Full purge = `git filter-repo` +
-force-push; would rewrite every descendant hash (~35 commits) cited across
-BUILD-PLAN/AGENTS/AGENT_LOG. Related exposure, flagged for the same decision:
+**Purge EXECUTED (owner decision, same day 2026-10-29):** owner chose full history purge.
+`git filter-repo` 2.47.0 stripped docs/reverse from a fresh mirror clone (124 commits
+preserved; 0 touch the path post-rewrite; `refs/pull/1/head` verified clean + GitHub-managed,
+left untouched) and force-pushed main + `v0.1.0` + `ci/macos-fix`. Local repo resynced
+(reset --hard + reflog expire + gc; stale local branch `lane/autoapply` deleted — it still
+carried the old chain). Old→new map committed: **docs/HISTORY-PURGE-MAP.md** (34 rewritten
+hashes; docs citing old hashes resolve through the map; commit messages were auto-updated
+by filter-repo). Honest caveats: GitHub may serve cached views of old commit SHAs until a
+support purge is filed — owner may file one with GitHub; any pre-purge clone/fork keeps the
+blobs. Related exposure, flagged for the same decision:
 `docs/MACUPDATER-BREAKDOWN.md` (committed by design since day one as a deliverable) also
 contains MacUpdater internals — same exposure class, different lock scope.
 

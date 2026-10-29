@@ -126,6 +126,12 @@ PKG need.** Reasons, in order of decisiveness:
 
 ## 6. Decision box (owner signs here)
 
-- Decision (proceed / do not build / defer): ____________________
-- Date: ____________________
-- Signature / name: ____________________
+- Decision (proceed / do not build / defer): **PROCEED — build dormant.** The helper is built
+  and tested but permanently inert by default: no code path installs, registers, or launches
+  it. Activation additionally requires (a) Apple Developer ID enrollment (Apple refuses to
+  trust unsigned daemons) and (b) an explicit, deliberate owner activation step. Until both,
+  the shipped privileged path remains the staged owner-command flow (Updatest shape).
+- Date: 2026-10-29
+- Signature / name: Owner, via recorded session decision 2026-10-29 — owner selected
+  "Sign §6 — build it dormant (Recommended)" when asked directly. Recorded verbatim in
+  AGENTS.md and docs/archive/AGENT_LOG.md same day.
