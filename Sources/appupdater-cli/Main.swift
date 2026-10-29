@@ -1,7 +1,9 @@
 import Foundation
 import AppUpdaterCore
 
-// appupdater-cli — scriptable surface for the scan + check + install-plan engines.
+// appupdater-cli — scriptable surface for the scan + check + install-plan engines,
+// plus the glue-wiring read-only introspection modes (security / brew-pins /
+// brew-doctor / proxy show).
 //
 //   appupdater-cli scan [--dir PATH]... [--apps NAME[,NAME...]] [--out FILE]
 //       Scan directories (default /Applications) and emit what is INSTALLED. No network.
@@ -39,6 +41,29 @@ import AppUpdaterCore
 //       Dry-run (--adopt without --apply) emits the decisions as pure data,
 //       exit 0, refusals recorded in the report; --apply is the consent path.
 //
+// Glue-wiring read-only modes (all exit 0 with honest data; 2 usage, 1 failure):
+//   appupdater-cli security <app-path> [--out FILE]
+//       One app's security panel: SecInspector's read-only codesign/spctl/
+//       entitlement probes + the bundle-forensics classifications
+//       (iOS-app-on-Mac, Setapp). Nothing is modified.
+//   appupdater-cli brew-pins [--out FILE]
+//       The Homebrew prefix + the pinned formulae/casks (read-only; a missing
+//       pinned file observes as "no pins"). brew is never executed.
+//   appupdater-cli brew-doctor [--out FILE]
+//       The engine-sanctioned read-only `brew doctor` probe (no sudo; output
+//       verbatim). Nothing is fixed automatically.
+//   appupdater-cli brew-index [--out FILE]
+//       The brew FORMULA whole-index status: one ETag-cached GET of the public
+//       formulae.brew.sh/api/formula.json catalog (the engine's own data plane
+//       — brew is never executed), reporting loaded / record count / the
+//       verbatim lastError. Read-only: cache files in Application Support only.
+//   appupdater-cli proxy show [--out FILE]
+//       The persisted proxy settings, what a session built from them would do,
+//       and a one-shot READ-ONLY system-proxy snapshot (SCDynamicStore read,
+//       no monitor left running). There is deliberately NO `proxy set`: the
+//       CLI has no settings-mutation precedent — edit proxy_settings.json via
+//       the app's Proxy sheet.
+//
 // Output: JSON on stdout (or a file via --out). Exit codes: 0 ok, 2 usage error,
 // 3 honest-refusal (not wired / plan rejected), 1 failure.
 
@@ -47,6 +72,11 @@ USAGE:
   appupdater-cli scan    [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
   appupdater-cli check   [--dir PATH]... [--apps NAME[,NAME...] ] [--out FILE]
   appupdater-cli install [--apps NAME] --out FILE [--apply] [--relaunch] [--adopt] [--force]
+  appupdater-cli security <app-path> [--out FILE]
+  appupdater-cli brew-pins      [--out FILE]
+  appupdater-cli brew-doctor    [--out FILE]
+  appupdater-cli brew-index     [--out FILE]
+  appupdater-cli proxy show     [--out FILE]
 
 scan   : enumerate installed apps (no network). Default roots are
          /Applications plus your custom scan locations (unless --dir given).
@@ -73,13 +103,33 @@ install: dry-run install PLAN per --apps (one app for --apply; refusals are
          detectable). Without --apply this is a dry-run: decisions as pure
          JSON data, exit 0, refusals recorded in the report. --relaunch has
          no meaning here and is a usage error with --adopt.
+security: one app's security panel — read-only codesign/spctl/entitlement
+         probes (SecReport) + the bundle classifications (iOS-app-on-Mac,
+         Setapp). Nothing is modified, nothing is installed.
+brew-pins : the Homebrew prefix + pinned formulae/casks (read-only file
+         reads; a missing pinned file observes as "no pins", never an error).
+         brew is never executed.
+brew-doctor: the read-only `brew doctor` probe (no sudo, hardening env
+         applied by the engine; verbatim output). Nothing is fixed for you.
+brew-index: the brew FORMULA whole-index status — one ETag-cached GET of the
+         public formulae.brew.sh catalog through the engine's own store
+         (read-only data plane; brew is never executed), reporting loaded,
+         the cached record count, the cache directory, and the verbatim
+         lastError. Exit 0 with honest data even on a failed load.
+proxy show: the persisted proxy settings (proxy_settings.json), what a
+         session built from them does, a one-shot read-only system-proxy
+         snapshot (no monitor left running), and the documented proxy
+         environment variables as the process sees them (pure env read).
+         There is deliberately NO
+         `proxy set` — the CLI has no settings-mutation modes; edit the
+         settings in the app's Proxy sheet.
 --out FILE writes the JSON there instead of stdout (parent dir must exist).
 """
 
 @main
 struct CliMain {
-    static func main() async {
-        let arguments = Array(CommandLine.arguments.dropFirst())
+    /// The parsed CLI surface (see `parseCli` for the grammar contract).
+    struct CliArguments {
         var mode = "scan"
         var dirs: [URL] = []
         var nameFilters: [String] = []
@@ -88,6 +138,14 @@ struct CliMain {
         var relaunchRequested = false
         var adoptRequested = false
         var forceRequested = false
+        var securityPath: String?
+    }
+
+    /// The full argument grammar: positional modes, glue modes (with their
+    /// positional followers), flags, and the adopt/force/relaunch discipline.
+    /// Usage problems exit 2 via printUsage; -h/--help prints and exits 0.
+    static func parseCli(_ arguments: [String]) -> CliArguments {
+        var args = CliArguments()
         var positionalModeCount = 0
 
         var index = 0
@@ -99,31 +157,65 @@ struct CliMain {
                     errLine("error: mode specified twice\n")
                     exit(2)
                 }
-                mode = arg
+                args.mode = arg
                 positionalModeCount += 1
+            case "security":
+                if positionalModeCount > 0 {
+                    errLine("error: mode specified twice\n")
+                    exit(2)
+                }
+                args.mode = "security"
+                positionalModeCount += 1
+                // The app path is a POSITIONAL value (documented grammar:
+                // `security <app-path>`) — it must not look like a flag.
+                guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("-") else {
+                    printUsage("security requires an app bundle path: appupdater-cli security /Applications/Foo.app")
+                }
+                index += 1
+                args.securityPath = arguments[index]
+            case "brew-pins", "brew-doctor", "brew-index":
+                if positionalModeCount > 0 {
+                    errLine("error: mode specified twice\n")
+                    exit(2)
+                }
+                args.mode = arg
+                positionalModeCount += 1
+            case "proxy":
+                if positionalModeCount > 0 {
+                    errLine("error: mode specified twice\n")
+                    exit(2)
+                }
+                args.mode = "proxy"
+                positionalModeCount += 1
+                // Only `proxy show` exists — deliberately (the CLI has no
+                // settings-mutation modes; see the usage text).
+                guard index + 1 < arguments.count, arguments[index + 1] == "show" else {
+                    printUsage("proxy requires 'show' (only `proxy show` exists — there is no `proxy set`; edit the settings in the app's Proxy sheet)")
+                }
+                index += 1
             case "--dir":
                 guard index + 1 < arguments.count else { printUsage("missing value for --dir") }
                 index += 1
-                dirs.append(URL(fileURLWithPath: arguments[index], isDirectory: true))
+                args.dirs.append(URL(fileURLWithPath: arguments[index], isDirectory: true))
             case "--apps":
                 guard index + 1 < arguments.count else { printUsage("missing value for --apps") }
                 index += 1
-                nameFilters = arguments[index]
+                args.nameFilters = arguments[index]
                     .split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
                     .filter { !$0.isEmpty }
             case "--out":
                 guard index + 1 < arguments.count else { printUsage("missing value for --out") }
                 index += 1
-                outFile = arguments[index]
+                args.outFile = arguments[index]
             case "--apply":
-                applyRequested = true
+                args.applyRequested = true
             case "--relaunch":
-                relaunchRequested = true
+                args.relaunchRequested = true
             case "--adopt":
-                adoptRequested = true
+                args.adoptRequested = true
             case "--force":
-                forceRequested = true
+                args.forceRequested = true
             case "-h", "--help":
                 print(usage)
                 exit(0)
@@ -136,15 +228,29 @@ struct CliMain {
         // --adopt flag discipline: adoption is an install-mode lane, --force is
         // only its version-gate override consent, and nothing is ever installed
         // or relaunched by AppUpdater on the adopt path.
-        if adoptRequested, mode != "install" {
+        if args.adoptRequested, args.mode != "install" {
             printUsage("--adopt applies to install only")
         }
-        if forceRequested, !adoptRequested {
+        if args.forceRequested, !args.adoptRequested {
             printUsage("--force is only meaningful with --adopt")
         }
-        if adoptRequested, relaunchRequested {
+        if args.adoptRequested, args.relaunchRequested {
             printUsage("--relaunch has no meaning with --adopt (AppUpdater never installs or relaunches on the adopt path)")
         }
+        return args
+    }
+
+    static func main() async {
+        let parsed = parseCli(Array(CommandLine.arguments.dropFirst()))
+        var mode = parsed.mode
+        var dirs = parsed.dirs
+        var nameFilters = parsed.nameFilters
+        let outFile = parsed.outFile
+        let applyRequested = parsed.applyRequested
+        let relaunchRequested = parsed.relaunchRequested
+        let adoptRequested = parsed.adoptRequested
+        let forceRequested = parsed.forceRequested
+        let securityPath = parsed.securityPath
 
         let appSupport = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/AppUpdater", isDirectory: true)
@@ -174,6 +280,15 @@ struct CliMain {
         }
 
         do {
+            // Glue-wiring read-only modes return BEFORE any scan or source
+            // roster is built (they need no scan, no session, no stores).
+            if try await dispatchGlueMode(
+                mode: mode, securityPath: securityPath,
+                appSupport: appSupport, outFile: outFile)
+            {
+                return
+            }
+
             let scanner = ProductionAppScanner()
             var apps = try await scanner.scan(directoryURLs: dirs)
             if !nameFilters.isEmpty {
@@ -189,13 +304,20 @@ struct CliMain {
                 return
             }
 
+            // Proxied session (glue-wiring): adopt the persisted ProxySettings
+            // through the engine's documented dictionary bridge. Adoption is
+            // best-effort with honest stderr notes: the CLI completes its
+            // report under the system configuration rather than refusing on
+            // proxy configuration (stdout stays pure JSON either way).
+            let cliSession = await Self.buildProxiedSession()
+
             // --adopt: the MAS→Homebrew adoption lane. Consults ONLY the
             // whole-index cask store (no sparkle/MAS/github/electron lookups —
             // adoption needs the cask identity, not an update claim), so this
             // branch returns BEFORE the source roster is built below.
             if mode == "install", adoptRequested {
                 try await runAdopt(
-                    apps: apps, appSupport: appSupport,
+                    apps: apps, appSupport: appSupport, session: cliSession,
                     apply: applyRequested, force: forceRequested, outFile: outFile)
                 return
             }
@@ -204,8 +326,9 @@ struct CliMain {
             // whole-index cask (ETag-cached, alias-free matching) with an
             // honest fallback to the per-token pipeline; Sparkle; MAS;
             // GitHub (bounded sparkle-feed harvest); Electron (unknown lane,
-            // oracle-gated strictly-newer-only).
-            let caskIndex = CaskIndexStore(directory: appSupport)
+            // oracle-gated strictly-newer-only). Every networked source is
+            // constructed with the proxied session adopted above.
+            let caskIndex = CaskIndexStore(directory: appSupport, session: cliSession)
             var sources: [any UpdateSource] = []
             let revalidated = await caskIndex.ensureLoaded()
             var indexUsable = revalidated
@@ -215,24 +338,33 @@ struct CliMain {
             if indexUsable {
                 sources.append(CaskIndexSource(store: caskIndex))
             } else {
-                sources.append(CaskSource())
+                sources.append(CaskSource(session: cliSession))
             }
             sources.append(SparkleSource())
-            sources.append(MASSource())
-            sources.append(GithubSource(directory: appSupport, session: .shared))
+            sources.append(MASSource(session: cliSession))
+            sources.append(GithubSource(directory: appSupport, session: cliSession))
             sources.append(ElectronSource())
             let manualService = ManualSourceResolverService(store: ManualSourceStore(directory: appSupport))
             let engine = UpdateCheckEngine(
                 sources: sources,
                 manualSource: manualService.engineResolver(
-                    session: .shared, githubCacheDirectory: appSupport),
+                    session: cliSession, githubCacheDirectory: appSupport),
                 feedDerivation: FeedDerivationResolver { app in
                     SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
                 })
             let checks = await engine.checkAll(apps: apps)
 
             if mode == "check" {
-                try emit(CheckReport(mode: mode, count: checks.count, apps: checks), outFile)
+                // Storefront annotation (glue-wiring, display-only): the
+                // machine's storefront verdict rides along on the check
+                // report. It NEVER re-routes a lookup — the MAS source keeps
+                // its locked `us` country pin regardless.
+                let storefront = await Storefront.currentStorefront()
+                try emit(
+                    CheckReport(
+                        mode: mode, count: checks.count, apps: checks,
+                        storefront: StorefrontAnnotation(storefront)),
+                    outFile)
                 return
             }
 
@@ -280,10 +412,41 @@ struct CliMain {
                     plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot,
                     relaunchRequested: relaunchRequested)
 
+                // Candidate-filter receipts (glue-wiring, candidates lane):
+                // the deep filter over the FINAL artifact of a completed
+                // dmg/zip apply — the deployed bundle at the app's original
+                // path. Data-only: the filter never overrides the security
+                // floor (its own header documents that). A pkg staging has no
+                // bundle to judge (the owner judges the pkg with pkgutil
+                // before the owner-run installer command); an aborted apply
+                // leaves nothing final to filter.
+                let candidateFilter: CandidateFilterReport?
+                let candidateFilterNote: String?
+                if let aborted = outcome.abortedStep {
+                    candidateFilter = nil
+                    candidateFilterNote =
+                        "no final artifact to filter — the apply aborted at \(aborted.rawValue)"
+                } else if outcome.stagedCommand != nil {
+                    candidateFilter = nil
+                    candidateFilterNote =
+                        "pkg staging: the bundle-shape candidate filters do not apply to a .pkg "
+                            + "artifact — judge the staged pkg with `pkgutil --check-signature` "
+                            + "before the owner-run installer command"
+                } else {
+                    candidateFilter = CandidateFilter.filter(
+                        candidateURL: URL(fileURLWithPath: plan.app.path))
+                    candidateFilterNote =
+                        "filter receipts over the deployed bundle at \(plan.app.path) — display "
+                            + "data; the security floor (HTTPS + sha256 + artifact magic) is the "
+                            + "unchanged gate"
+                }
+
                 try emit(InstallApplyReport(
                     mode: "install-apply",
                     applied: outcome.abortedStep == nil,
-                    outcome: outcome), outFile)
+                    outcome: outcome,
+                    candidateFilter: candidateFilter,
+                    candidateFilterNote: candidateFilterNote), outFile)
 
                 // STAGED-PKG v1: a green pkg staging ends with the owner-run
                 // command — print it where a human reads (stderr; stdout stays
@@ -338,9 +501,10 @@ struct CliMain {
     /// owner-run command on stderr (stdout stays pure JSON). brew is NEVER
     /// executed here; the command is a string for the owner's hand.
     private static func runAdopt(
-        apps: [InstalledApp], appSupport: URL, apply: Bool, force: Bool, outFile: String?
+        apps: [InstalledApp], appSupport: URL, session: URLSession,
+        apply: Bool, force: Bool, outFile: String?
     ) async throws {
-        let caskIndex = CaskIndexStore(directory: appSupport)
+        let caskIndex = CaskIndexStore(directory: appSupport, session: session)
         let revalidated = await caskIndex.ensureLoaded()
         var indexUsable = revalidated
         if !indexUsable {
@@ -407,12 +571,7 @@ struct CliMain {
             outFile)
     }
 
-    /// The one place stderr bytes come from: argument and refusal messages
-    /// are literals here (always UTF-8-encodable), so if encoding somehow
-    /// ever failed, this writes nothing instead of crashing a tool that is
-    /// already reporting an error — the exit code at the call site stays
-    /// committed as the truth (forced encode would be a crash, not a receipt).
-    private static func errLine(_ text: String) {
+    static func errLine(_ text: String) {
         if let utf8 = text.data(using: .utf8) {
             FileHandle.standardError.write(utf8)
         }
@@ -445,6 +604,10 @@ struct ScanAppSummary: Codable, Hashable {
     var bundleVersion: String?
     var isMacAppStore: Bool
     var hasSparkleFeed: Bool
+    /// Glue-wiring additive (Setapp lane): the app's Setapp classification —
+    /// a pure, synchronous documented-root path check. Display data only; it
+    /// never gates or re-routes anything.
+    var setapp: SetappClassification
 
     init(_ app: InstalledApp) {
         name = app.name
@@ -454,65 +617,8 @@ struct ScanAppSummary: Codable, Hashable {
         bundleVersion = app.bundleVersion
         isMacAppStore = app.isMacAppStore
         hasSparkleFeed = !(app.sparkleFeedURL ?? "").isEmpty
+        setapp = SetappClassification(SetappSupport.classify(bundlePath: app.path))
     }
-}
-
-struct ScanReport: Codable {
-    var mode: String
-    var count: Int
-    var apps: [ScanAppSummary]
-}
-
-/// Full verdict report from `check` (candidates, failures, resolution).
-struct CheckReport: Codable {
-    var mode: String
-    var count: Int
-    var apps: [UpdateCheck]
-}
-
-/// Install-mode dry-run report: per-app PLAN data with labeled absent claims.
-/// The dry-run path always emits `applied: false` — a plan is data, nothing
-/// downloaded or moved. The APPLY path emits `InstallApplyReport` instead.
-struct InstallPlanEntry: Codable, Hashable {
-    var app: ScanAppSummary
-    var update: UpdateInfo?
-    var plan: InstallPlan?
-    var note: String
-
-    init(app: InstalledApp, update: UpdateInfo?, plan: InstallPlan?, note: String) {
-        self.app = ScanAppSummary(app)
-        self.update = update
-        self.plan = plan
-        self.note = note
-    }
-}
-
-struct InstallPlanReport: Codable {
-    var mode: String
-    var count: Int
-    var apps: [InstallPlanEntry]
-    var applied: Bool
-}
-
-/// The `install --apply` outcome envelope: full receipt chain + abort state.
-/// `applied` mirrors `outcome.abortedStep == nil` (redundant, machine-friendly).
-struct InstallApplyReport: Codable {
-    var mode: String
-    var applied: Bool
-    var outcome: InstallOutcome
-}
-
-/// The `install --adopt` report: flat MASAdoptDecision values per app.
-/// Dry-run always emits `applied: false` (data only, refusals included as
-/// decision values). The apply path emits `applied: true` with the staged
-/// owner-run command; refusals never reach the report on the apply path
-/// (they exit 3 first — refusal runs write no output file, the standing
-/// gate discipline).
-struct InstallAdoptReport: Codable {
-    var mode: String
-    var count: Int
-    var apps: [MASAdoptDecision]
-    var applied: Bool
 }
 
 // MARK: - Encoder policy (deterministic reports)
