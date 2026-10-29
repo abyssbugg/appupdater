@@ -852,6 +852,8 @@ final class AppState: ObservableObject {
             try await rules.ignoreVersion(bundleID, version: version)
         case .autoCheck:
             try await rules.setAutoCheck(bundleID, true)
+        case .noAutoCheck:
+            try await rules.setAutoCheck(bundleID, false)
         }
         return await rules.evaluate(apps: lastApps, checks: lastChecks)
     }

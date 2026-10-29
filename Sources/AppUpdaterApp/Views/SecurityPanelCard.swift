@@ -179,13 +179,28 @@ struct SecurityPanelSection: View {
                         .background(Capsule().fill(storefrontColor(storefront).opacity(0.14)))
                         .foregroundStyle(storefrontColor(storefront))
                 }
-                Text(storefront.note)
+                // User-facing copy only — the engine's provenance note cites
+                // internal teardown documents and must never render here.
+                Text(storefrontCaption(storefront))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                Text("Display data only: MAS lookups stay pinned to the documented `us` catalog — this verdict never re-routes a lookup.")
+                Text("Display only — this verdict never changes how lookups run.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    /// One plain-language sentence per storefront verdict (the engine's
+    /// `note` is internal honesty data for the CLI/JSON surfaces, not UI copy).
+    private func storefrontCaption(_ storefront: StorefrontInfo) -> String {
+        switch storefront.status {
+        case .eligible:
+            return "Your App Store region is supported — lookups use its catalog."
+        case .excluded:
+            return "App Store lookups are skipped for your region (documented exclusion list)."
+        case .unknown:
+            return "App Store region could not be determined — those lookups may be unavailable."
         }
     }
 

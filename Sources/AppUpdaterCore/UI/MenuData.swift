@@ -130,7 +130,10 @@ public struct MenuData: Sendable, Equatable {
 
         let pending = Self.pendingRows(from: appRowSummary)
         self.pendingSection = (updates: pending, actions: pending.flatMap { Self.actions(for: $0) })
-        self.scheduleSection = Self.scheduleLines(schedule: schedule, now: now)
+        self.scheduleSection = Self.scheduleLines(
+            schedule: schedule, now: now,
+            checkedCount: appRowSummary.filter { $0.check != nil }.count
+        )
         self.counts = (pending: pending.count, total: appRowSummary.count)
     }
 
@@ -176,7 +179,9 @@ public struct MenuData: Sendable, Equatable {
     /// Schedule lines over the frozen snapshot only. Line 0 carries the
     /// scheduled state; history honesty lines (last fire, catch-up, error)
     /// follow and appear regardless of the on/off policy.
-    internal static func scheduleLines(schedule: ScheduleSnapshot, now: Date) -> [String] {
+    internal static func scheduleLines(
+        schedule: ScheduleSnapshot, now: Date, checkedCount: Int = 0
+    ) -> [String] {
         var lines: [String] = []
 
         if schedule.policy.intervalMinutes <= 0 {

@@ -20,7 +20,10 @@ struct MenuBarView: View {
 
             Divider().padding(.vertical, 3)
 
-            ForEach(menu.headline, id: \.id.stableID) { action in
+            // Quit renders ONCE, at the bottom (the dedicated section below);
+            // the headline actions exclude it here so the menu never shows
+            // two Quit items.
+            ForEach(menu.headline.filter { !isQuitAction($0.id) }, id: \.id.stableID) { action in
                 menuButton(action, symbol: headlineSymbol(action.id))
             }
 
@@ -88,6 +91,18 @@ struct MenuBarView: View {
 
     // MARK: pieces
 
+    /// Rows that actually carry check results (drives the honest header:
+    /// "All up to date" is only claimable when checks have run).
+    private var checkedCount: Int {
+        appState.list.rows.filter { $0.check != nil }.count
+    }
+
+    private func headerStatus(pending: Int, checked: Int) -> String {
+        if pending > 0 { return "\(pending) update\(pending == 1 ? "" : "s") available" }
+        if checked == 0 { return "No checks yet" }
+        return "All up to date"
+    }
+
     private func statusHeader(_ menu: MenuData) -> some View {
         let pending = menu.counts.pending
         return HStack(spacing: 8) {
@@ -95,7 +110,7 @@ struct MenuBarView: View {
                 .foregroundStyle(pending > 0 ? .orange : .green)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 0) {
-                Text(pending > 0 ? "\(pending) update\(pending == 1 ? "" : "s") available" : "All up to date")
+                Text(headerStatus(pending: pending, checked: checkedCount))
                     .font(.callout.weight(.semibold))
                 Text("\(menu.counts.total) apps watched")
                     .font(.caption2)

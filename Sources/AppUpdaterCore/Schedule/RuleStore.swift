@@ -197,24 +197,29 @@ public struct RuleStore: Sendable {
         return try persist(rules)
     }
 
-    /// Adds (true) or removes (false) an explicit .autoCheck rule. true is
-    /// idempotent (no duplicate rule is created); false removes any existing
-    /// autoCheck rule for the bundle while leaving every other kind untouched.
+    /// Includes (true) or excludes (false) `bundleID` from automatic timed
+    /// checks. ON is the default, so true removes any .noAutoCheck (and
+    /// legacy .autoCheck) rules for the bundle; false persists one explicit
+    /// .noAutoCheck rule and drops contradictory legacy .autoCheck rules for
+    /// the same bundle. Other rule kinds are untouched either way.
     @discardableResult
     public func setAutoCheck(
         _ bundleID: String, _ enabled: Bool, at date: Date = Date()
     ) async throws -> [IgnoreRule] {
         var rules = try await load()
         if enabled {
-            if !rules.contains(where: {
-                $0.kind == .autoCheck && $0.bundleIdentifier == bundleID
-            }) {
-                rules.append(
-                    IgnoreRule(kind: .autoCheck, bundleIdentifier: bundleID, createdAt: date)
-                )
+            rules.removeAll {
+                $0.bundleIdentifier == bundleID
+                    && ($0.kind == .noAutoCheck || $0.kind == .autoCheck)
             }
         } else {
-            rules.removeAll { $0.kind == .autoCheck && $0.bundleIdentifier == bundleID }
+            rules.removeAll {
+                $0.bundleIdentifier == bundleID
+                    && ($0.kind == .noAutoCheck || $0.kind == .autoCheck)
+            }
+            rules.append(
+                IgnoreRule(kind: .noAutoCheck, bundleIdentifier: bundleID, createdAt: date)
+            )
         }
         return try persist(rules)
     }
@@ -259,8 +264,10 @@ public struct RuleStore: Sendable {
     ///   string equals `version` EXACTLY; a nil claim never matches a version
     ///   rule (no version known ⇒ nothing can be ignored), and a rule with a
     ///   nil version (malformed input) never matches anything.
-    /// - .autoCheck → autoCheck = true only from explicit .autoCheck rules;
-    ///   default OFF per app in v1.
+    /// - Automatic checks default ON (read-only source lookups — the app's
+    ///   core promise must not be inert out of the box); .noAutoCheck is the
+    ///   explicit opt-out. .autoCheck is the legacy opt-IN marker from the v1
+    ///   default-OFF era and keeps meaning ON for persisted old files.
     static func evaluate(
         rules: [IgnoreRule], bundleIdentifier: String, version: String?
     ) -> RuleDecision {
@@ -275,6 +282,8 @@ public struct RuleStore: Sendable {
                 }
             case .autoCheck:
                 decision.autoCheck = true
+            case .noAutoCheck:
+                decision.autoCheck = false
             }
         }
         return decision

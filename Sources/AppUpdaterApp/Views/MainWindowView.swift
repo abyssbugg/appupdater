@@ -169,6 +169,7 @@ struct MainWindowView: View {
                     .symbolEffect(.rotate, isActive: isRefreshing)
             }
             .help("Check all apps against their sources now")
+            .accessibilityLabel("Check Now")
 
             Picker("Sort", selection: Binding(
                 get: { list.sort }, set: { list.setSort($0) })) {
@@ -179,6 +180,7 @@ struct MainWindowView: View {
             .pickerStyle(.menu)
             .fixedSize()
             .help("Sort apps")
+            .accessibilityLabel("Sort apps")
 
             Picker("Show", selection: Binding(
                 get: { list.filter }, set: { list.setFilter($0) })) {
@@ -189,6 +191,7 @@ struct MainWindowView: View {
             .pickerStyle(.menu)
             .fixedSize()
             .help("Filter apps")
+            .accessibilityLabel("Filter: show all, updates, or ignored")
 
             Button {
                 showSettingsSheet = true
@@ -196,6 +199,7 @@ struct MainWindowView: View {
                 Image(systemName: "gearshape")
             }
             .help("Schedule & notifications")
+            .accessibilityLabel("Schedule & notifications settings")
 
             Button {
                 showLocationsSheet = true
@@ -203,6 +207,7 @@ struct MainWindowView: View {
                 Image(systemName: "folder.badge.plus")
             }
             .help("Custom scan locations")
+            .accessibilityLabel("Custom scan locations settings")
 
             Button {
                 showManualSheet = true
@@ -210,6 +215,7 @@ struct MainWindowView: View {
                 Image(systemName: "pin")
             }
             .help("Manual source pins")
+            .accessibilityLabel("Manual source pins settings")
 
             Button {
                 showBrewSheet = true
@@ -217,6 +223,7 @@ struct MainWindowView: View {
                 Image(systemName: "pin.square")
             }
             .help("Homebrew pins & doctor")
+            .accessibilityLabel("Homebrew pins and doctor")
 
             Button {
                 showProxySheet = true
@@ -224,6 +231,7 @@ struct MainWindowView: View {
                 Image(systemName: "network.badge.shield.half.filled")
             }
             .help("Proxy settings & system picture")
+            .accessibilityLabel("Proxy settings")
         }
     }
 
@@ -284,6 +292,14 @@ struct MainWindowView: View {
         let stats = list.stats
         if stats.total == 0 { return "No apps yet — run a check" }
         if stats.pending > 0 { return "\(stats.pending) of \(stats.total) apps need updates" }
+        // Honesty: "up to date" is only claimable once checks have run. A
+        // zero-check state (fresh install, or every app opted out) must not
+        // read as a verdict.
+        let checked = list.rows.filter { $0.check != nil }.count
+        if checked == 0 { return "\(stats.total) apps ready — run a check" }
+        if checked < stats.total {
+            return "No updates found — \(checked) of \(stats.total) checked"
+        }
         return "All \(stats.total) apps up to date"
     }
 

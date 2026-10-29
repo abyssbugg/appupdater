@@ -178,7 +178,7 @@ struct RuleStoreTests {
         let exact = try await store.evaluate(bundleIdentifier: "com.tenor", claimVersion: "1.2.3")
         #expect(exact.ignoredVersion)
         #expect(!exact.ignoredBundle)
-        #expect(!exact.autoCheck)
+        #expect(exact.autoCheck)   // automatic checks default ON; a version rule never disables them
 
         let different = try await store.evaluate(bundleIdentifier: "com.tenor", claimVersion: "1.2.4")
         #expect(!different.ignoredVersion)
@@ -234,49 +234,68 @@ struct RuleStoreTests {
         #expect(try #require(openRows.first).updateAvailable)
     }
 
-    // MARK: (6) setAutoCheck true adds once, false removes, siblings survive
+    // MARK: (6) automatic checks default ON; explicit opt-out via .noAutoCheck
 
-    @Test func setAutoCheckAddsOnceAndFalseRemoves() async throws {
+    @Test func autoCheckDefaultsOnAndOptOutPersistsExplicitly() async throws {
         let (store, dir, _) = try makeStore("autocheck-toggle")
+        // Default ON: automatic checks are the app's core promise (read-only
+        // source lookups); auto-APPLY consent stays a separate OFF boundary.
         let initial = try await store.evaluate(bundleIdentifier: "com.zeta", claimVersion: nil)
-        #expect(initial.autoCheck == false)   // default OFF per app in v1
+        #expect(initial.autoCheck)
 
+        // true on an already-default-ON bundle adds no rule (nothing to say).
         let once = try await store.setAutoCheck("com.zeta", true, at: baseDate)
-        #expect(once.count == 1)
-        #expect(once[0].kind == .autoCheck)
-        #expect(once[0].bundleIdentifier == "com.zeta")
+        #expect(once.count == 0)
 
-        // Second true is a no-op on the identity level (no duplicate).
-        let twice = try await store.setAutoCheck("com.zeta", true, at: baseDate.addingTimeInterval(30))
+        // false persists exactly one explicit .noAutoCheck opt-out.
+        let off = try await store.setAutoCheck("com.zeta", false, at: baseDate)
+        #expect(off.count == 1)
+        #expect(off[0].kind == .noAutoCheck)
+        #expect(off[0].bundleIdentifier == "com.zeta")
+        let excluded = try await store.evaluate(bundleIdentifier: "com.zeta", claimVersion: nil)
+        #expect(excluded.autoCheck == false)
+
+        // Second false stays a single rule (idempotent — no duplicates).
+        let twice = try await store.setAutoCheck("com.zeta", false, at: baseDate.addingTimeInterval(30))
         #expect(twice.count == 1)
-
-        let after = try await store.evaluate(bundleIdentifier: "com.zeta", claimVersion: nil)
-        #expect(after.autoCheck)
+        #expect(twice[0].kind == .noAutoCheck)
 
         // A sibling rule must survive the toggle in both directions.
         _ = try await store.ignoreBundle("com.zeta", at: baseDate)
+        let withSibling = try await store.evaluate(bundleIdentifier: "com.zeta", claimVersion: nil)
+        #expect(withSibling.autoCheck == false)
+        #expect(withSibling.ignoredBundle)
 
-        let off = try await store.setAutoCheck("com.zeta", false, at: baseDate)
-        #expect(off.count == 1)
-        #expect(off[0].kind == .ignoreBundle)   // autoCheck removed, ignoreBundle kept
-
-        let final = try await store.evaluate(bundleIdentifier: "com.zeta", claimVersion: nil)
-        #expect(final.autoCheck == false)
-        #expect(final.ignoredBundle)
-
-        // False on a bundle with no autoCheck rule is an honest no-op — the
-        // autoCheck row is already gone from the statement above, so only the
-        // sibling ignoreBundle remains.
-        let untouched = try await store.setAutoCheck("com.stranger", false, at: baseDate)
-        #expect(untouched.count == 1)
-        #expect(untouched[0].kind == .ignoreBundle)
-        // Re-enable adds the autoCheck rule back exactly once.
+        // true removes the opt-out; the sibling ignoreBundle survives.
         let restored = try await store.setAutoCheck("com.zeta", true, at: baseDate)
-        #expect(restored.count == 2)
-        #expect(restored.filter { $0.kind == .autoCheck }.count == 1)
-        // Persisted truth agrees with all of it.
-        let state = try await RuleStore(directory: dir).load()
-        #expect(state.count == 2)
+        #expect(restored.count == 1)
+        #expect(restored[0].kind == .ignoreBundle)
+        let backOn = try await store.evaluate(bundleIdentifier: "com.zeta", claimVersion: nil)
+        #expect(backOn.autoCheck)
+        #expect(backOn.ignoredBundle)
+
+        // Legacy .autoCheck opt-IN rules from the v1 default-OFF era still
+        // mean ON, and turning the app off drops the contradictory legacy
+        // marker in favor of one .noAutoCheck rule.
+        _ = try await store.setAutoCheck("com.legacy", true, at: baseDate) // no-op (default ON)
+        _ = try await store.removeBundleRules("com.legacy")
+        _ = try await store.save([
+            IgnoreRule(kind: .autoCheck, bundleIdentifier: "com.legacy", createdAt: baseDate)
+        ])
+        let legacy = try await store.evaluate(bundleIdentifier: "com.legacy", claimVersion: nil)
+        #expect(legacy.autoCheck)
+        let legacyOff = try await store.setAutoCheck("com.legacy", false, at: baseDate)
+        #expect(legacyOff.count == 1)
+        #expect(legacyOff[0].kind == .noAutoCheck)   // legacy .autoCheck replaced
+        let legacyFinal = try await store.evaluate(bundleIdentifier: "com.legacy", claimVersion: nil)
+        #expect(legacyFinal.autoCheck == false)
+
+        // An unrelated bundle's false write touches nothing else.
+        let strangerBefore = try await RuleStore(directory: dir).load()
+        _ = try await store.setAutoCheck("com.stranger", false, at: baseDate)
+        let stranger = try await store.evaluate(bundleIdentifier: "com.stranger", claimVersion: nil)
+        #expect(stranger.autoCheck == false)   // explicit opt-out persisted
+        #expect(strangerBefore.count + 1 == (try await RuleStore(directory: dir).load()).count)
     }
 
     // MARK: (7) SchedulePolicy clamping ladder

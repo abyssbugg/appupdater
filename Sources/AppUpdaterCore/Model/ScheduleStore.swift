@@ -129,9 +129,14 @@ public enum RuleKind: String, Codable, Hashable, Sendable {
     case ignoreBundle
     /// Ignore this specific version claim for this app (same-major-happy).
     case ignoreVersion
-    /// Include this app in automatic timed checks (default OFF per app in v1 —
-    /// only explicitly enabled apps burn check requests; manual Check-now is unconstrained).
+    /// Include this app in automatic timed checks (legacy opt-IN marker from
+    /// the v1 default-OFF era; kept for persisted-file compatibility — the
+    /// evaluator treats it the same as the default).
     case autoCheck
+    /// Exclude this app from automatic timed checks (the explicit OPT-OUT;
+    /// automatic checks are ON by default — read-only source lookups only,
+    /// and auto-APPLY consent is a separate, still-default-OFF boundary).
+    case noAutoCheck
 }
 
 /// One per-app rule row.
@@ -157,10 +162,12 @@ public struct RuleDecision: Codable, Hashable, Sendable {
     public var ignoredBundle: Bool
     /// .ignoreVersion active for this exact (app, version) pair.
     public var ignoredVersion: Bool
-    /// .autoCheck → included in timed scans.
+    /// Included in timed scans (default ON; an explicit .noAutoCheck rule
+    /// turns it off — automatic checks are read-only source lookups, and
+    /// auto-APPLY consent stays a separate default-OFF boundary).
     public var autoCheck: Bool
 
-    public init(ignoredBundle: Bool = false, ignoredVersion: Bool = false, autoCheck: Bool = false) {
+    public init(ignoredBundle: Bool = false, ignoredVersion: Bool = false, autoCheck: Bool = true) {
         self.ignoredBundle = ignoredBundle
         self.ignoredVersion = ignoredVersion
         self.autoCheck = autoCheck
