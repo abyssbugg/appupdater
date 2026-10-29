@@ -17,3 +17,7 @@ DerivedData/
 .verity/*
 !.verity/standard.yaml
 .claude/settings.local.json
+
+# LOCAL-ONLY competitor teardowns (owner decision): never commit. Untracked 2026-10-29
+# after 4507c4a was found to have committed them to the public repo.
+docs/reverse/
