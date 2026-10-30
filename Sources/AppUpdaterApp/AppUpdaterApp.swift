@@ -37,8 +37,12 @@ struct AppUpdaterApp: App {
             MainWindowView()
                 .environmentObject(appState)
                 .environmentObject(glue)
-                .frame(minWidth: 640, minHeight: 380)
         }
-        .defaultSize(width: 820, height: 520)
+        // ONE minimum, owned by MainWindowView (940×560). The old scene-level
+        // 640pt min + 820pt default let the window shrink below the content
+        // minimum, so SwiftUI centered the wider content and clipped both
+        // edges (live-capture finding 2026-10-30).
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1200, height: 720)
     }
 }

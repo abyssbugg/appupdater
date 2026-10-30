@@ -742,7 +742,7 @@ final class AppState: ObservableObject {
                         options: [.foreground]),
                     UNNotificationAction(
                         identifier: NotificationActionIDs.actionStageInstall,
-                        title: "Install Update",
+                        title: "Update",
                         options: []),
                 ],
                 intentIdentifiers: [],
@@ -774,7 +774,7 @@ final class AppState: ObservableObject {
                 Task { await requestInstall(bundleID: bundleID) }
             } else {
                 actionError =
-                    "Install for \(appName): it is no longer in the current list — run a check and install it from the window."
+                    "Update for \(appName): it is no longer in the current list — run a check and update it from the window."
             }
         case .ignored:
             break
@@ -968,7 +968,7 @@ final class AppState: ObservableObject {
             }
             if let aborted = outcome.abortedStep {
                 let message =
-                    "Install for \(row.app.name) aborted at \(aborted.rawValue) — the receipt shows how far it got; nothing was left half-done silently."
+                    "Update for \(row.app.name) stopped at \(aborted.rawValue) — the receipt shows how far it got; nothing was left half-done silently."
                 lastInstallError = message
                 lastInstallErrorBundleID = bundleID
                 actionError = message
@@ -976,7 +976,7 @@ final class AppState: ObservableObject {
         } catch {
             // Surface the refusal where the user IS (the detail card), not
             // only on the list column's banner — see lastInstallError's doc.
-            lastInstallError = "Install for \(row.app.name) refused: \(error.localizedDescription)"
+            lastInstallError = "Update for \(row.app.name) refused: \(error.localizedDescription)"
             lastInstallErrorBundleID = bundleID
             actionError = lastInstallError
         }

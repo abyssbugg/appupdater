@@ -30,7 +30,7 @@ extension AppState {
         var errorDescription: String? {
             switch self {
             case .notAnUpdate(let name):
-                return "nothing to install — no newer verified claim for \(name) right now (run a check to refresh)"
+                return "nothing to update — no newer verified claim for \(name) right now (run a check to refresh)"
             case .storeApp(let name):
                 return "\(name) came from the Mac App Store — it cannot be user-space installed; update it in the App Store"
             }
