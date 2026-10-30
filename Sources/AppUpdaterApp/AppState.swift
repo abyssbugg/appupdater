@@ -241,8 +241,8 @@ final class AppState: ObservableObject {
 
     /// The authoritative last pipeline outputs; every re-evaluation (rule
     /// mutation, scheduled fire) rebuilds rows from this pair.
-    private var lastApps: [InstalledApp] = []
-    private var lastChecks: [UpdateCheck] = []
+    var lastApps: [InstalledApp] = []
+    var lastChecks: [UpdateCheck] = []
     private var engineTask: Task<Void, Never>?
 
     /// The FS-event monitor consumer task (inventory-refresh scope only).
@@ -322,6 +322,7 @@ final class AppState: ObservableObject {
         applyLaunchDisplayState(display)
         presentWelcomeTourIfNeeded()
         armDockBadgeObserver()
+        restoreLastChecks()
         startScheduler()
         startFileSystemMonitor()
     }
@@ -347,13 +348,6 @@ final class AppState: ObservableObject {
     /// neither-pending-nor-current stance, stated in MenuData's docs).
     var upToDateCount: Int {
         list.rows.filter { $0.check?.verdict == "current" }.count
-    }
-
-    /// Dynamic menu-bar title: pending count shown only when nonzero (the
-    /// MenuData counts contract — 0 shows nothing, never a fake number).
-    var menuBarTitle: String {
-        let pending = list.rows.filter { $0.updateAvailable }.count
-        return pending > 0 ? "AppUpdater · \(pending)" : "AppUpdater"
     }
 
     // MARK: Scheduling lifecycle (engine stream consumer + persistence)
@@ -480,6 +474,7 @@ final class AppState: ObservableObject {
         lastApps = apps
         lastChecks = checks
         let evaluated = await rules.evaluate(apps: apps, checks: checks)
+        persistLastChecks()
         await list.setRows(evaluated)
         await recordScheduledFireOutcome(appsChecked: targets.count, evaluatedRows: evaluated)
         // Decision-14: opt-in auto-apply pass (master OFF by default).
@@ -504,7 +499,7 @@ final class AppState: ObservableObject {
     /// their honest missing-dot); a failed store read never silently drops
     /// locations — it surfaces verbatim in ``scanLocationsError`` and the
     /// scan proceeds on the base roots alone.
-    private func effectiveScanDirectories() -> [URL] {
+    func effectiveScanDirectories() -> [URL] {
         var roots = scanDirectories
         do {
             for resolved in try scanLocationStore.resolvedRoots() {
@@ -873,6 +868,7 @@ final class AppState: ObservableObject {
         ).checkAll(apps: apps)
         lastApps = apps
         lastChecks = checks
+        persistLastChecks()
         return await rules.evaluate(apps: apps, checks: checks)
     }
 

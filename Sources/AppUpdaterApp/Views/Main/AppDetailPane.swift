@@ -75,8 +75,8 @@ private struct AppDetailContent: View {
                     .font(.largeTitle.weight(.bold))
                     .lineLimit(2)
                 versionHeadline
-                if let source = row.check?.resolved?.source {
-                    Text(SourceStyle.label(for: source))
+                if let sources = row.answeringSourcesText {
+                    Text(sources)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -338,8 +338,8 @@ private struct AppDetailContent: View {
             Text("Information").font(.title3.weight(.semibold))
             infoRow("Version", VersionText.installed(row.app))
             infoRow("Bundle ID", row.app.bundleIdentifier)
-            if let source = row.check?.resolved?.source {
-                infoRow("Source", SourceStyle.label(for: source))
+            if let sources = row.answeringSourcesText {
+                infoRow("Sources", sources)
             }
             if let failure = row.check?.failures.first {
                 infoRow("Last Error", failure.message)

@@ -90,6 +90,24 @@ extension AppRow {
         }
     }
 
+    /// Sources that ANSWERED for this app: the resolved claim's source, else
+    /// every distinct candidate source (a "current" verdict has candidates but
+    /// no resolved claim — showing it as "No Source" was a live honesty bug).
+    var answeringSources: [SourceKind] {
+        if let source = check?.resolved?.source { return [source] }
+        var seen: [SourceKind] = []
+        for candidate in check?.candidates ?? [] where !seen.contains(candidate.source) {
+            seen.append(candidate.source)
+        }
+        return seen
+    }
+
+    /// "Homebrew, Sparkle" — Updatest's sources caption.
+    var answeringSourcesText: String? {
+        let sources = answeringSources
+        return sources.isEmpty ? nil : sources.map(SourceStyle.label(for:)).joined(separator: ", ")
+    }
+
     /// A rules-muted update: the source claims newer, a rule hides it.
     var isMutedUpdate: Bool { check?.verdict == "update" && !updateAvailable }
 

@@ -36,4 +36,23 @@ import Testing
         let claim = UpdateInfo(source: .cask, newestShortVersion: CaskVersion.split("0.21.2,088d292d364f").marketing)
         #expect(VersionOracle().resolve(candidates: [claim], installedShortVersion: "0.0.0")?.newestShortVersion == "0.21.2")
     }
+
+    /// Live 2026-10-30: installed Warp 0.2026.10.21.08.25.02 was reported as an
+    /// update to the cask's 0.2026.10.21.08.25.stable_02 — the same release.
+    @Test func stableChannelLabelIsTheSameRelease() {
+        let marketing = CaskVersion.split("0.2026.10.21.08.25.stable_02").marketing
+        #expect(marketing == "0.2026.10.21.08.25.02")
+        #expect(!VersionOracle().isUpdateAvailable(installed: "0.2026.10.21.08.25.02", available: marketing))
+        let newer = CaskVersion.split("0.2026.10.28.08.25.stable_01").marketing
+        #expect(VersionOracle().isUpdateAvailable(installed: "0.2026.10.21.08.25.02", available: newer))
+    }
+
+    @Test func stableSpellingsNormalizeAndOthersAreUntouched() {
+        #expect(CaskVersion.split("1.2.stable-03").marketing == "1.2.03")
+        #expect(CaskVersion.split("1.2.Stable7").marketing == "1.2.7")
+        #expect(CaskVersion.split("1.2.stable").marketing == "1.2.stable")
+        #expect(CaskVersion.split("1.2.stable_x1").marketing == "1.2.stable_x1")
+        #expect(CaskVersion.split("1.2.beta_03").marketing == "1.2.beta_03")
+        #expect(CaskVersion.split("2.0.0-rc1").marketing == "2.0.0-rc1")
+    }
 }

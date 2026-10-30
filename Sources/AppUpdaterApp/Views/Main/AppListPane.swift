@@ -11,8 +11,8 @@ enum SourceFilter: Hashable {
     func admits(_ row: AppRow) -> Bool {
         switch self {
         case .all: return true
-        case .kind(let kind): return row.check?.resolved?.source == kind
-        case .noSource: return row.check?.resolved == nil
+        case .kind(let kind): return row.answeringSources.contains(kind)
+        case .noSource: return row.answeringSources.isEmpty
         }
     }
 }
@@ -311,8 +311,8 @@ struct AppRowView: View {
 
     @ViewBuilder
     private var sourceLine: some View {
-        if let source = row.check?.resolved?.source {
-            Text(SourceStyle.label(for: source))
+        if let sources = row.answeringSourcesText {
+            Text(sources)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else if let verdict = row.check?.verdict {

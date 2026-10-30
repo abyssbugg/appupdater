@@ -9,152 +9,73 @@ struct MenuBarView: View {
     let checkForSelfUpdate: () -> Void
     @EnvironmentObject private var appState: AppState
 
-    private let pendingRowLimit = 6
-
+    /// Updatest's native menu, in its order:
+    ///   App Updates (N) ▸ · Refresh · Open AppUpdater… · Settings… ·
+    ///   Check for Updates… (self-update) · Quit (exactly once).
+    /// Every action still routes through MenuData IDs → `handle(_:)`.
     var body: some View {
         let menu = appState.menuData
-        VStack(alignment: .leading, spacing: 2) {
-            statusHeader(menu)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-
-            Divider().padding(.vertical, 3)
-
-            // Quit renders ONCE, at the bottom (the dedicated section below);
-            // the headline actions exclude it here so the menu never shows
-            // two Quit items.
-            ForEach(menu.headline.filter { !isQuitAction($0.id) }, id: \.id.stableID) { action in
-                menuButton(action, symbol: headlineSymbol(action.id))
-            }
-
-            Divider().padding(.vertical, 3)
-
-            Button {
-                checkForSelfUpdate()
-            } label: {
-                Label("Check for Self-Update…", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .padding(.horizontal, 6)
-
-            Divider().padding(.vertical, 3)
-
-            if menu.pendingSection.updates.isEmpty {
-                Label("No pending updates", systemImage: "checkmark.seal")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-            } else {
-                Text("UPDATES")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 2)
-
-                ForEach(Array(menu.pendingSection.updates.prefix(pendingRowLimit))) { row in
-                    pendingRow(row)
-                }
-
-                if menu.pendingSection.updates.count > pendingRowLimit {
-                    menuButton(
-                        MenuAction(id: .openMainWindow, label: "See all \(menu.pendingSection.updates.count)…"),
-                        symbol: "arrow.right.circle")
+        let pending = menu.pendingSection.updates
+        Group {
+            Menu("App Updates (\(pending.count))") {
+                if pending.isEmpty {
+                    Text(checkedCount == 0 ? "Not Checked Yet" : "No Updates Available")
+                } else {
+                    ForEach(pending) { row in
+                        Button(rowTitle(row)) { handle(.viewDetails(bundleID: row.app.bundleIdentifier)) }
+                    }
                 }
             }
 
-            Divider().padding(.vertical, 3)
+            Divider()
 
-            ForEach(menu.scheduleSection, id: \.self) { line in
-                Text(line)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 10)
+            ForEach(menu.headline.filter { isCheckAction($0.id) }, id: \.id.stableID) { _ in
+                Button("Refresh") { handle(.checkNow) }
+            }
+            // Honest last-check status (MenuData's schedule lines), read-only.
+            if let status = menu.scheduleSection.first {
+                Text(status)
             }
 
-            Divider().padding(.vertical, 3)
+            Divider()
 
-            ForEach(menu.headline.filter { isQuitAction($0.id) }, id: \.id.stableID) { action in
-                menuButton(action, symbol: "power")
+            ForEach(menu.headline.filter { isOpenAction($0.id) }, id: \.id.stableID) { _ in
+                Button("Open AppUpdater…") { handle(.openMainWindow) }
+            }
+
+            Divider()
+
+            Button("Settings…") { handle(.openSettings) }
+            Button("Check for Updates…") { checkForSelfUpdate() }
+
+            Divider()
+
+            ForEach(menu.headline.filter { isQuitAction($0.id) }, id: \.id.stableID) { _ in
+                Button("Quit") { handle(.quit) }
+                    .keyboardShortcut("q")
             }
         }
-        .padding(.vertical, 4)
-        .frame(minWidth: 260)
         .onAppear {
             // Coordinator wiring for the notify-actions lane's opener seam:
-            // this surface appears at launch and owns a working openWindow
-            // closure, so the "Open AppUpdater" notification action can also
-            // RE-CREATE the main window after the user closed it (not just
-            // activate an existing one).
+            // this surface owns a working openWindow closure, so the "Open
+            // AppUpdater" notification action can also RE-CREATE the main
+            // window after the user closed it (not just activate one).
             appState.mainWindowOpener = showMainWindow
         }
     }
 
     // MARK: pieces
 
-    /// Rows that actually carry check results (drives the honest header:
-    /// "All up to date" is only claimable when checks have run).
+    /// Rows that actually carry check results ("No Updates Available" is
+    /// only claimable when checks have run).
     private var checkedCount: Int {
         appState.list.rows.filter { $0.check != nil }.count
     }
 
-    private func headerStatus(pending: Int, checked: Int) -> String {
-        if pending > 0 { return "\(pending) update\(pending == 1 ? "" : "s") available" }
-        if checked == 0 { return "No checks yet" }
-        return "All up to date"
-    }
-
-    private func statusHeader(_ menu: MenuData) -> some View {
-        let pending = menu.counts.pending
-        return HStack(spacing: 8) {
-            Image(systemName: pending > 0 ? "arrow.up.circle.fill" : "checkmark.seal.fill")
-                .foregroundStyle(pending > 0 ? .orange : .green)
-                .font(.title3)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(headerStatus(pending: pending, checked: checkedCount))
-                    .font(.callout.weight(.semibold))
-                Text("\(menu.counts.total) apps watched")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func pendingRow(_ row: AppRow) -> some View {
-        ForEach(MenuData.actions(for: row), id: \.id.stableID) { action in
-            if isRowPrimaryAction(action.id) {
-                Button {
-                    handle(action.id)
-                } label: {
-                    HStack(spacing: 8) {
-                        AppIconView(path: row.app.path, size: 18)
-                        Text(row.app.name)
-                            .font(.callout)
-                            .lineLimit(1)
-                        Spacer(minLength: 6)
-                        if let new = row.check?.resolved?.newestShortVersion {
-                            Text(new)
-                                .font(.caption.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .padding(.horizontal, 6)
-                }
-            }
-        }
-    }
-
-    private func menuButton(_ action: MenuAction, symbol: String) -> some View {
-        Button {
-            handle(action.id)
-        } label: {
-            Label {
-                Text(action.label)
-            } icon: {
-                Image(systemName: symbol)
-            }
-        }
-        .padding(.horizontal, 6)
+    /// "Hermes  0.0.0 → 0.21.2"
+    private func rowTitle(_ row: AppRow) -> String {
+        guard let new = row.check?.resolved?.newestShortVersion else { return row.app.name }
+        return "\(row.app.name)  \(row.app.shortVersion ?? "?") → \(new)"
     }
 
     // MARK: handler map (unchanged contract)
@@ -177,26 +98,20 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: symbol mapping
-
-    private func headlineSymbol(_ id: MenuAction.ID) -> String {
-        switch id {
-        case .checkNow: return "arrow.clockwise"
-        case .openMainWindow: return "macwindow"
-        case .quit: return "power"
-        default: return "circle"
-        }
-    }
+    // MARK: action predicates
 
     private func isQuitAction(_ id: MenuAction.ID) -> Bool {
         if case .quit = id { return true }
         return false
     }
 
-    /// The menu row's PRIMARY action is viewing details; install staging stays
-    /// in the window's detail pane (consent surface, not a flyout).
-    private func isRowPrimaryAction(_ id: MenuAction.ID) -> Bool {
-        if case .viewDetails = id { return true }
+    private func isCheckAction(_ id: MenuAction.ID) -> Bool {
+        if case .checkNow = id { return true }
+        return false
+    }
+
+    private func isOpenAction(_ id: MenuAction.ID) -> Bool {
+        if case .openMainWindow = id { return true }
         return false
     }
 }

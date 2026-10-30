@@ -22,7 +22,7 @@ struct AppUpdaterApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra(appState.menuBarTitle, systemImage: "arrow.triangle.2.circlepath") {
+        MenuBarExtra {
             MenuBarView(showMainWindow: {
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)
@@ -30,8 +30,15 @@ struct AppUpdaterApp: App {
                 selfUpdate.checkForUpdates()
             })
             .environmentObject(appState)
-            .buttonStyle(.borderless)
+        } label: {
+            // Updatest: glyph + honest pending count (rules-aware; nothing
+            // when zero).
+            let pending = appState.menuData.counts.pending
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .accessibilityLabel(pending > 0 ? "AppUpdater, \(pending) updates" : "AppUpdater")
+            if pending > 0 { Text("\(pending)") }
         }
+        .menuBarExtraStyle(.menu)
 
         Window("AppUpdater", id: "main") {
             MainWindowView()
