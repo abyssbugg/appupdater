@@ -80,6 +80,25 @@ public struct BrewProcessRunner: Sendable {
         self.run = run
     }
 
+    /// Homebrew's documented install prefixes (Apple silicon, Intel).
+    public static let standardBrewBinDirectories = ["/opt/homebrew/bin", "/usr/local/bin"]
+
+    /// The inherited environment with Homebrew's standard bin directories
+    /// APPENDED to PATH when absent. A Finder/launchd-launched app inherits
+    /// launchd's minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), on which
+    /// `/usr/bin/env brew` exits 127 even though brew is installed — the app
+    /// surface would report a false "brew missing". Appending (never
+    /// prepending) keeps the owner's own PATH order authoritative.
+    public static func environmentWithBrewPath(_ base: [String: String]) -> [String: String] {
+        var environment = base
+        var entries = (base["PATH"] ?? "").split(separator: ":").map(String.init).filter { !$0.isEmpty }
+        for directory in standardBrewBinDirectories where !entries.contains(directory) {
+            entries.append(directory)
+        }
+        environment["PATH"] = entries.joined(separator: ":")
+        return environment
+    }
+
     /// Production runner: the Deploy.runProcess pattern + environment
     /// injection. The passed environment REPLACES the child's environment
     /// (callers merge over ProcessInfo.processInfo.environment — see
@@ -163,7 +182,7 @@ public struct BrewDoctorCheck: Sendable {
 
     /// The child environment: inherited first, hardening wins on conflict.
     public static func environment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
+        var environment = BrewProcessRunner.environmentWithBrewPath(ProcessInfo.processInfo.environment)
         for (key, value) in hardening { environment[key] = value }
         return environment
     }

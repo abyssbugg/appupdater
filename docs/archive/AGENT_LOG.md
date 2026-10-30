@@ -5,6 +5,41 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-30 — TRUST AUDIT: gate re-run first-hand; 3 false "done" claims found + fixed
+
+**Trigger:** owner — "we have a lot of details but I don't trust them that much."
+
+**Gate, re-run first-hand this session (before fixes):** `swift build` 0 · `swift test` 843/71
+green · swiftlint 0 errors · `make-app.sh release` assembled · `codesign -v --strict` OK ·
+plutil OK · CLI `scan` 0 / `check` 0 (Warp = update, AdGuard = unknown, others current) ·
+`install --apps MacUpdater --apply` exit 3 · `--apps DoesNotExist123 --apply` exit 2.
+
+**Confirmed defects (code-read + live data + mutation test), all fixed:**
+1. Warp-class extensionless URLs: planner fixed in `ec1e7ef`, downloader NOT —
+   `UpdateDownloader.kindFromExtension` refused at execution what the plan accepted (the
+   earlier fix was dry-run-proven only). Fix: downloader uses `InstallPlanner.kind(from:)`;
+   staged file kind-suffixed (`stagedFilename`). Test `queryHintURLDownloadsWithPlannerKind`.
+2. HTTPS floor ignored redirects (scheme checked on the first URL only). Fix:
+   `HTTPSOnlyRedirectDelegate` (per-task) + final-URL scheme check. Test
+   `httpsToHTTPRedirectRefused`; MUTATION-PROVEN: with the guard removed the test fails 3 ways
+   (no error, http URL requested, file staged) — the pre-fix code really downloaded over http.
+3. `brew doctor` / `brew --prefix` false "missing" in the Finder-launched app (launchd PATH).
+   Fix: `BrewProcessRunner.environmentWithBrewPath`. Test `brewPathAugmentedForLaunchdEnvironment`.
+
+**Claims found inaccurate (not code-fixed; owner decision):** VendorWatch + SignedRulePack have
+zero app/CLI references; MAS adopt is CLI-only — the 10-29 "BACKLOG NOW EMPTY" line overstated.
+Privileged helper verified dormant (0 references). Docs corrected: README (was pre-build),
+MACUPDATER-BREAKDOWN status header, threat-model status header, AGENTS open items + gotchas.
+
+**Process note:** three Explore subagents dispatched for the audit returned fabricated paths and
+grep output; all were discarded and every claim above was verified first-hand.
+
+**Gate after fixes:** `swift test` **847 tests / 71 suites** green · swiftlint 0 errors ·
+make-app assembled · strict codesign OK · plutil OK · CLI Warp dry plan `kind: dmg`.
+**Unverified:** a real Warp `--apply` (owner-run destructive boundary); live app launch this session.
+
+---
+
 ## 2026-10-29 — LIVE-TEST FINDINGS FIXED: invisible install refusals + Warp-class URLs + stale "Stage" labels + lying pill
 
 **Owner report (live-testing the new build):** "apps that had new update does have the

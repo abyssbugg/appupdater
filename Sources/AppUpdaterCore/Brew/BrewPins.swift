@@ -172,14 +172,15 @@ public struct BrewPrefixResolver: Sendable {
 
     /// The prefix URL, or nil with the honest reason unavailable (callers that
     /// need a reason can run the seam themselves; this type's job is the
-    /// location only). The runner's environment is passed through unchanged —
+    /// location only). The inherited environment is passed through (Homebrew's
+    /// standard bin dirs appended to PATH, see `environmentWithBrewPath`) —
     /// prefix resolution carries no hardening (it is not a brew *operation*,
     /// just a path probe).
     public func resolve() async -> URL? {
         guard let run = try? await runner.run(
             BrewProcessRunner.envLaunchPath,
             ["brew", "--prefix"],
-            ProcessInfo.processInfo.environment)
+            BrewProcessRunner.environmentWithBrewPath(ProcessInfo.processInfo.environment))
         else { return nil }
         guard run.exitStatus == 0 else { return nil }
         let trimmed = run.stdout.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -78,7 +78,13 @@ public struct UpdateDownloader: Sendable {
         guard url.scheme?.lowercased() == "https" else {
             throw InstallerError.httpsRequired(url: url.absoluteString)
         }
-        let kind = try Self.kindFromExtension(url: url)
+        // ONE kind resolver for plan AND execution: `InstallPlanner.kind(from:)`
+        // (path extension, else a query-string hint for extensionless URLs such
+        // as Warp's `…/download/brew?…&package=dmg`). Before 2026-10-30 the
+        // downloader read only the path extension, so a plan the planner
+        // accepted was refused here at execution time. `kindFromExtension`
+        // stays the source of the honest refusal message when neither yields.
+        let kind = try InstallPlanner.kind(from: url) ?? Self.kindFromExtension(url: url)
 
         // Digest comparisons are case-insensitive hex: normalize BOTH sides
         // before comparing whatever formatting the source used.
@@ -90,9 +96,16 @@ public struct UpdateDownloader: Sendable {
         var request = URLRequest(url: url)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
 
-        let (stream, response) = try await session.bytes(for: request)
+        // HTTPS floor across REDIRECTS (LOCKED decision 6): the task delegate
+        // refuses any hop to a non-https URL before that request is made (the
+        // 3xx is then delivered as the final response and refused below as
+        // non-2xx); the final-URL check is defense in depth.
+        let (stream, response) = try await session.bytes(for: request, delegate: HTTPSOnlyRedirectDelegate())
         guard let http = response as? HTTPURLResponse else {
             throw Self.downloadFailed(status: -1, url: url.absoluteString, detail: "did not receive an HTTP response")
+        }
+        if let finalURL = http.url, finalURL.scheme?.lowercased() != "https" {
+            throw InstallerError.httpsRequired(url: finalURL.absoluteString)
         }
         // Non-2xx (404s included) throws BEFORE the staging file exists —
         // nothing is ever written for a status we do not accept.
@@ -102,7 +115,7 @@ public struct UpdateDownloader: Sendable {
         // Missing or unparseable Content-Length (chunked responses) → no cross-check.
         let declaredLength = Int64(http.value(forHTTPHeaderField: "Content-Length").flatMap { Int64($0) } ?? -1)
 
-        let stagedURL = dir.appendingPathComponent(Self.resolvedFilename(from: url))
+        let stagedURL = dir.appendingPathComponent(Self.stagedFilename(from: url, kind: kind))
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             // A leftover from an aborted prior run could tail PAST the fresh
@@ -215,6 +228,16 @@ public struct UpdateDownloader: Sendable {
         return component
     }
 
+    /// The staged file name: the URL's last path component, suffixed with the
+    /// resolved kind when the path itself does not already carry it (query-hint
+    /// URLs: `…/download/brew?package=dmg` → `brew.dmg`), so every staged
+    /// artifact's extension tells downstream tools what it is.
+    static func stagedFilename(from url: URL, kind: InstallKind) -> String {
+        let base = resolvedFilename(from: url)
+        let suffix = "." + kind.rawValue
+        return base.lowercased().hasSuffix(suffix) ? base : base + suffix
+    }
+
     /// Zip sanity check: a staged zip MUST start with PK\x03\x04. Anything
     /// else (empty file, tampered prefix, HTML error page, …) is
     /// .magicMismatch — the staged file itself is removed by the caller.
@@ -247,5 +270,22 @@ public struct UpdateDownloader: Sendable {
         URLError(.badServerResponse, userInfo: [
             NSLocalizedDescriptionKey: "download failed: HTTP \(status) from \(url) (\(detail))"
         ])
+    }
+}
+
+/// Per-task redirect guard for artifact downloads (LOCKED decision 6: HTTPS
+/// only). URLSession follows redirects silently by default — including an
+/// https → http downgrade — so every hop is vetted here: a non-https target
+/// is refused (nil = do not follow), which surfaces the 3xx itself as the
+/// final response, refused by the caller's 2xx gate. No request is ever sent
+/// to the downgraded URL.
+final class HTTPSOnlyRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest
+    ) async -> URLRequest? {
+        request.url?.scheme?.lowercased() == "https" ? request : nil
     }
 }

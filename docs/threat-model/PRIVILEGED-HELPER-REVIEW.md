@@ -1,9 +1,13 @@
 # Privileged helper — threat-model review (Phase 7 gate)
 
-> STATUS: **AWAITING OWNER APPROVAL — NO IMPLEMENTATION STARTED, NONE MAY START
-> BEFORE THE BOX BELOW IS SIGNED.** Locked owner directive (AGENTS.md open items,
-> CLAUDE.md §7 standing rule): auth-touching directives get a threat-model review
-> BEFORE any code; the reviewer does not self-approve.
+> STATUS (updated 2026-10-30): **§6 SIGNED 2026-10-29 — "PROCEED, build dormant".**
+> The helper core is built and tested (`Sources/AppUpdaterCore/PrivilegedHelper`, `0ea737f`)
+> but INERT: no app or CLI code path references it (verified by grep 2026-10-30).
+> Activation still requires Developer ID enrollment + an explicit owner step.
+> Wording note: §3 item 3's "auto-apply remains nonexistent" predates LOCKED decision 14
+> (opt-in USER-SPACE auto-apply); it remains true for this helper — nothing privileged is
+> ever auto-applied. Original directive: auth-touching code gets this review BEFORE code;
+> the reviewer does not self-approve.
 
 ## 1. Proposed scope (what the helper would be)
 

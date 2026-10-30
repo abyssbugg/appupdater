@@ -48,9 +48,17 @@ final class DLStubURLProtocol: URLProtocol {
     private static let stubBox = DLBox<[String: StubResponse]>([:])
     private static let requestBox = DLBox<[DLRecordedRequest]>([])
 
+    private static let redirectBox = DLBox<[String: String]>([:])
+
     static func reset() {
         stubBox.with { stubs in stubs = [:] }
         requestBox.with { requests in requests = [] }
+        redirectBox.with { redirects in redirects = [:] }
+    }
+
+    /// Registers a 302 from `fromURL` to `toURL` (redirect-policy tests).
+    static func redirect(from fromURL: String, to toURL: String) {
+        redirectBox.with { redirects in redirects[fromURL] = toURL }
     }
 
     static func stub(_ body: Data, status: Int = 200, extraHeaders: [String: String] = [:], for urlString: String) {
@@ -75,6 +83,16 @@ final class DLStubURLProtocol: URLProtocol {
         guard let url = request.url else { return }
         Self.requestBox.with { requests in
             requests.append(DLRecordedRequest(url: url, userAgent: request.value(forHTTPHeaderField: "User-Agent")))
+        }
+        if let target = Self.redirectBox.with({ redirects in redirects[url.absoluteString] }),
+           let targetURL = URL(string: target),
+           let redirectResponse = HTTPURLResponse(
+               url: url, statusCode: 302, httpVersion: "HTTP/1.1",
+               headerFields: ["Location": target, "Content-Length": "0"]),
+           let client {
+            client.urlProtocol(self, wasRedirectedTo: URLRequest(url: targetURL), redirectResponse: redirectResponse)
+            client.urlProtocolDidFinishLoading(self)
+            return
         }
         let stub = Self.stubBox.with { stubs in stubs[url.absoluteString] }
         var headerFields = ["Content-Type": "application/octet-stream"]
@@ -534,5 +552,57 @@ struct DownloadTests {
         #expect(Checksum.normalizeHex("  6537082287548bbc953fc07d44ad67dede2861ba3400089880b8a0718ed0b5e3 ") == knownZipSHA256)
         #expect(Checksum.normalizeHex("AB CDEF\n\t01") == "abcdef01")
         #expect(Checksum.normalizeHex("   ") == "")
+    }
+
+    // (2026-10-30 trust audit) Extensionless query-hint URL (Warp's real
+    // cask shape): the downloader must resolve the SAME kind the planner
+    // does, verify it, and stage it under a kind-suffixed name.
+    @Test func queryHintURLDownloadsWithPlannerKind() async throws {
+        DLStubURLProtocol.reset()
+        let dir = try makeStagingDir(named: "queryhint")
+        let urlString = "https://app.example.test/download/brew?version=v1.2&package=zip"
+        DLStubURLProtocol.stub(zipFixture, for: urlString)
+        let info = UpdateInfo(
+            source: .cask, newestShortVersion: "1.2", downloadURL: URL(string: urlString),
+            sha256Hex: knownZipSHA256, confidence: .high)
+        let staged = try await makeDownloader().downloadAndVerify(from: info, into: dir)
+        #expect(staged.kind == .zip)
+        #expect(staged.stagedURL.lastPathComponent == "brew.zip")
+        #expect(try diskBytes(staged.stagedURL) == zipFixture)
+    }
+
+    // (2026-10-30 trust audit) https -> http redirect downgrade is refused:
+    // the http URL is never requested and nothing is left staged.
+    @Test func httpsToHTTPRedirectRefused() async throws {
+        DLStubURLProtocol.reset()
+        let dir = try makeStagingDir(named: "redirect")
+        let start = "https://updates.example.test/downloads/App.zip"
+        let downgraded = "http://evil.example.test/App.zip"
+        DLStubURLProtocol.redirect(from: start, to: downgraded)
+        DLStubURLProtocol.stub(zipFixture, for: downgraded)
+        let info = UpdateInfo(
+            source: .cask, newestShortVersion: "2.0", downloadURL: URL(string: start),
+            sha256Hex: knownZipSHA256, confidence: .high)
+        await #expect(throws: (any Error).self) {
+            _ = try await makeDownloader().downloadAndVerify(from: info, into: dir)
+        }
+        #expect(!DLStubURLProtocol.recordedRequests.contains { $0.url.scheme == "http" })
+        #expect(try dirFiles(dir) == [])
+    }
+
+    @Test func stagedFilenameCarriesKind() {
+        let hinted = URL(string: "https://x.test/download/brew?package=dmg")!
+        #expect(UpdateDownloader.stagedFilename(from: hinted, kind: .dmg) == "brew.dmg")
+        let plain = URL(string: "https://x.test/downloads/App.DMG")!
+        #expect(UpdateDownloader.stagedFilename(from: plain, kind: .dmg) == "App.DMG")
+    }
+
+    @Test func brewPathAugmentedForLaunchdEnvironment() {
+        let launchd = BrewProcessRunner.environmentWithBrewPath(["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        #expect(launchd["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin")
+        let owner = BrewProcessRunner.environmentWithBrewPath(["PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin", "X": "1"])
+        #expect(owner["PATH"] == "/usr/local/bin:/opt/homebrew/bin:/usr/bin")
+        #expect(owner["X"] == "1")
+        #expect(BrewProcessRunner.environmentWithBrewPath([:])["PATH"] == "/opt/homebrew/bin:/usr/local/bin")
     }
 }

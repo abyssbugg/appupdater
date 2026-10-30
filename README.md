@@ -1,26 +1,38 @@
-# AppUpdater (name proposal, pending your final call) — Project Home
+# AppUpdater
 
-A **hybrid** macOS app updater for 2026: combines the full-scan / one-click / privileged /
-auto-update machinery of **MacUpdater** (deep-dive: [`docs/MACUPDATER-BREAKDOWN.md`](docs/MACUPDATER-BREAKDOWN.md))
-with the modern, serverless source strategy of **Updatest** (public Homebrew cask index,
-aggregated Sparkle appcasts, GitHub/Electron, App Store lookup).
+A **hybrid** macOS app updater: MacUpdater's execution engine (scan, one-click verified
+install, backups, quit/relaunch, scheduler) combined with Updatest's serverless source
+strategy (public Homebrew cask index, each app's own Sparkle appcast, Mac App Store lookup,
+GitHub releases, Electron metadata). It also updates itself via Sparkle 2 (EdDSA-signed).
 
-## Confirmed project decisions (2026-10-26)
-
-1. **Scope: BOTH** — updates *other* apps AND self-updates via Sparkle.
-2. **Architecture: HYBRID** — MacUpdater's execution engine + Updatest's source strategy, one app.
-3. **Mac App Store apps: BOTH modes** — inform-only display AND a force-update path (including
-   MAS→vendor-download replacement, like MacUpdater's `checkForMASOverwrite`).
-4. **Audience: private use AND public release** — so: code-signing + notarization from the start,
-   no hard dependency on our own server (public data sources first); optional private API later.
-5. **Working name: `AppUpdater`** (candidates were AppUpdater / AppUpdate / AppUpdatest).
-   - `AppUpdatest` rejected: derivative of "Updatest", bad for a public brand.
-   - `AppUpdate` rejected: ambiguous, collides with Android lib naming, weaker brand.
-   - `AppUpdater` chosen: descriptive, professional, no dominant macOS product using it.
-     Bundle ID proposal: `io.appupdater.AppUpdater`.
-6. **Not building yet.** Folder + docs only until design is approved.
+**Status:** built and in owner live-testing. Latest release: **v0.1.0** (2026-10-27,
+ad-hoc signed, NOT notarized — Gatekeeper warns on first launch). Swift 6.4 / SwiftPM,
+macOS 15.0+. Ground truth for decisions, gate and open items: [`AGENTS.md`](AGENTS.md);
+how-to-work protocol: [`CLAUDE.md`](CLAUDE.md).
 
 ## Layout
 
-- `docs/MACUPDATER-BREAKDOWN.md` — evidence-based deep-dive of MacUpdater 3.5 + sparkle/cask/MAS ecosystem + our recommended architecture.
-- `docs/evidence/` — captured reference samples (cask JSON API, macupdater DB-tier page).
+| Path | What |
+|---|---|
+| `Sources/AppUpdaterCore` | dependency-free engine: scan, sources, version oracle, installer, schedule, auto-apply gate, notifications, … |
+| `Sources/AppUpdaterApp` | SwiftUI window + menu-bar shell (LSUIElement), Sparkle self-update |
+| `Sources/appupdater-cli` | `scan` / `check` / `install` (dry-run default, `--apply`) / `security` / `brew-*` / `proxy`; JSON on stdout |
+| `Tests/AppUpdaterCoreTests` | Swift Testing suite (XCTest discovery is broken on this toolchain) |
+| `Scripts/make-app.sh`, `Scripts/make-release.sh` | bundle assembly + signed release pipeline |
+| `docs/` | architecture (`MACUPDATER-BREAKDOWN.md`), phase history (`BUILD-PLAN.md`), release runbook, threat model, evidence, full log (`archive/AGENT_LOG.md`) |
+
+## Quick start
+
+```
+swift build && swift test
+swift run appupdater-cli scan
+swift run appupdater-cli check --apps Ghostty
+Scripts/make-app.sh release && open build/AppUpdater.app
+```
+
+## Security floor
+
+HTTPS-only downloads (including every redirect hop), SHA-256 verification + artifact magic
+before anything is replaced, bundle-identifier hijack refusal at swap, zip backup before
+swap. PKG installers and `brew --adopt` are never executed — only staged as owner-run
+commands. No privileged helper is active (built dormant; activation needs Developer ID).
