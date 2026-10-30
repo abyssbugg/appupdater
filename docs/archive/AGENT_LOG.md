@@ -468,3 +468,12 @@ User goal stated; MacUpdater located in `/Applications`; log-derived scan/update
 (Sparkle-feed-first scan with cask fallthrough; privileged helper path observed live:
 "update needs auth, and helper installed, using priviledgedhelpertool").
 Full detail of this window is merged into the 2026-10-26 entry above (same investigation run).
+
+
+## 2026-10-30 — Updatest-parity UI sprint (coordinator: Rovo Dev)
+Owner: "look EXACTLY like Updatest", correct hybrid, worktrees + subagents. Live AX/screenshot audit of Updatest + MacUpdater vs AppUpdater (ours showed 0 updates; Updatest 8, MacUpdater 4).
+- Lane A merged `ad69b1e`: CheckCarryOver (FS rescans no longer wipe verdicts), launch fire resolves targets from fresh scan + rules (was checking nothing), honest appsChecked.
+- Lane B merged `9828769`: CaskVersion.split (Devin `3.11.234,92c8…` false positive), UpdateInfo.newestBuild, CLI `--apps` by name/bundle id/file name.
+- Lane C (subagent failed; done by coordinator) merged `478a311`: Updatest layout in Sources/AppUpdaterApp/Views/Main/; window-clipping root cause (scene min 640 < view min 940); Bionic (`+8` semver metadata → installed unparseable) and Telegram Desktop (same-named cask, other vendor's quit id) false positives fixed + LiveFalsePositiveTests (7). Gate 869/74, lint 0, live Updates (3) = cmux/Hermes/Warp.
+- Lane D rejected (deleted 8 behavior tests; badge ignored rules). Redo open.
+- Unverified: detail pane live capture (AX click tooling failed); Update All on a real app (owner-run boundary).
