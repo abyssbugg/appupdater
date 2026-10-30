@@ -422,10 +422,7 @@ final class AppState: ObservableObject {
     /// autoCheck decisions (fresh reads — rule edits apply to the next fire
     /// with no restart, mirroring the engine's seam contract).
     func autoCheckBundleIDs() -> [String] {
-        // R2: At app launch, list.rows is empty. When this fires before manual
-        // refresh, return [] to trigger inventory-only fire in scheduledFire.
-        if list.rows.isEmpty { return [] }
-        return list.rows.filter { $0.decision.autoCheck }.map { $0.app.bundleIdentifier }
+        list.rows.filter { $0.decision.autoCheck }.map { $0.app.bundleIdentifier }
     }
 
     /// The engine's fire seam.
@@ -451,36 +448,51 @@ final class AppState: ObservableObject {
     /// and touches ``lastScheduledPendingNames`` — scheduled fires only.
     func scheduledFire(_ ids: [String]?) async throws -> Int {
         let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
+        // nil ids = the list had nothing to supply (always true at launch, before
+        // any rows exist). Resolve targets from THIS scan + the rules' autoCheck
+        // decisions (default ON; `.noAutoCheck` opts out), so the first fire
+        // really checks. Inventory-only remains only when every app opted out.
+        let wanted: Set<String>
         if let ids {
-            let wanted = Set(ids)
-            let targets = apps.filter { wanted.contains($0.bundleIdentifier) }
-            let checks = await UpdateCheckEngine(
-                sources: await checkSources(),
-                manualSource: manualSourceResolver.engineResolver(
-                    session: proxySession.session, githubCacheDirectory: appSupportDirectory),
-                feedDerivation: FeedDerivationResolver { app in
-                    SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
-                }
-            ).checkAll(apps: targets)
-            lastApps = apps
-            lastChecks = checks
-            let evaluated = await rules.evaluate(apps: apps, checks: checks)
-            await list.setRows(evaluated)
-            await recordScheduledFireOutcome(appsChecked: targets.count, evaluatedRows: evaluated)
-            // Decision-14: after checks + rules, the opt-in auto-apply pass
-            // runs (master OFF by default → this reads one settings file and
-            // returns; opted-in apps are gated, applied, and receipted).
-            lastAutoApplyReceipt = await runAutoApplyPass(evaluated: evaluated)
-            return targets.count
+            wanted = Set(ids)
+        } else {
+            let decided = await rules.evaluate(apps: apps, checks: [])
+            wanted = Set(decided.filter { $0.decision.autoCheck }.map { $0.app.bundleIdentifier })
         }
+        let targets = apps.filter { wanted.contains($0.bundleIdentifier) }
+        guard !targets.isEmpty else {
+            lastChecks = carriedChecks(for: apps)
+            lastApps = apps
+            let evaluated = await rules.evaluate(apps: apps, checks: lastChecks)
+            await list.setRows(evaluated)
+            // Honest: no source was consulted in an inventory-only fire.
+            await recordScheduledFireOutcome(appsChecked: 0, evaluatedRows: evaluated)
+            return 0
+        }
+        let checks = await UpdateCheckEngine(
+            sources: await checkSources(),
+            manualSource: manualSourceResolver.engineResolver(
+                session: proxySession.session, githubCacheDirectory: appSupportDirectory),
+            feedDerivation: FeedDerivationResolver { app in
+                SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
+            }
+        ).checkAll(apps: targets)
         lastApps = apps
-        lastChecks = []
-        let evaluated = await rules.evaluate(apps: apps, checks: [])
+        lastChecks = checks
+        let evaluated = await rules.evaluate(apps: apps, checks: checks)
         await list.setRows(evaluated)
-        // R3: When ids is nil (inventory-only fire), no sources are consulted.
-        // Record appsChecked as 0 (honest), not apps.count (false "checked").
-        await recordScheduledFireOutcome(appsChecked: 0, evaluatedRows: evaluated)
-        return apps.count
+        await recordScheduledFireOutcome(appsChecked: targets.count, evaluatedRows: evaluated)
+        // Decision-14: opt-in auto-apply pass (master OFF by default).
+        lastAutoApplyReceipt = await runAutoApplyPass(evaluated: evaluated)
+        return targets.count
+    }
+
+    /// Prior verdicts carried onto a fresh scan (`CheckCarryOver`): unchanged
+    /// apps keep their check; new, moved, or self-updated apps get an
+    /// unchecked placeholder. No source is consulted (LOCKED decision 13).
+    func carriedChecks(for apps: [InstalledApp]) -> [UpdateCheck] {
+        let carried = CheckCarryOver.carry(previousChecks: lastChecks, previousApps: lastApps, newApps: apps)
+        return zip(apps, carried).map { app, check in check ?? UpdateCheck(app: app, candidates: [], resolved: nil) }
     }
 
     // MARK: Gap-sprint wiring (scan roots, source roster, FS monitor)
@@ -577,23 +589,8 @@ final class AppState: ObservableObject {
     func refreshInventoryOnly() async {
         do {
             let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
-            // R1: Carry over previous checks for unchanged apps (same bundleIdentifier,
-            // path, and versions). Vanished or self-updated apps lose their checks.
-            let carriedChecks = CheckCarryOver.carry(
-                previousChecks: lastChecks,
-                previousApps: lastApps,
-                newApps: apps
-            )
-            // Compact carries into a parallel array of definite checks, filling nil
-            // entries (new/changed apps) with "unknown" verdict placeholders.
-            var checksForEvaluation: [UpdateCheck] = []
-            for (index, carried) in carriedChecks.enumerated() {
-                if let check = carried {
-                    checksForEvaluation.append(check)
-                } else {
-                    checksForEvaluation.append(UpdateCheck(app: apps[index], candidates: [], resolved: nil))
-                }
-            }
+            // Verdicts survive a folder change; only changed/vanished apps lose theirs.
+            let checksForEvaluation = carriedChecks(for: apps)
             lastApps = apps
             lastChecks = checksForEvaluation
             let evaluated = await rules.evaluate(apps: apps, checks: checksForEvaluation)
