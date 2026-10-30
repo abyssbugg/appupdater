@@ -40,12 +40,20 @@ public struct CaskIndexSource: UpdateSource, Sendable {
             !version.isEmpty else {
             return nil // missing/blank version → never synthesize one
         }
+        // R4 fix: Homebrew cask versions may include a build suffix after a comma.
+        // Marketing version (before comma) is what we compare; build suffix is stored separately.
+        // E.g., "3.11.234,92c83011d1..." → newestShortVersion="3.11.234", newestBuild="92c83011d1..."
+        let versionParts = version.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false)
+        let marketingVersion = String(versionParts[0])
+        let buildSuffix = versionParts.count > 1 ? String(versionParts[1]) : nil
+
         return UpdateInfo(
             source: .cask,
-            newestShortVersion: version,
+            newestShortVersion: marketingVersion,
             // Cask JSON carries `bundle_version`, but this phase pins
             // newestBundleVersion = nil per the single-cask source's frozen brief.
             newestBundleVersion: nil,
+            newestBuild: buildSuffix,
             downloadURL: Self.downloadURL(from: match.record.url),
             sha256Hex: match.record.sha256?.hex?
                 .trimmingCharacters(in: .whitespacesAndNewlines),

@@ -294,7 +294,8 @@ struct CliMain {
             if !nameFilters.isEmpty {
                 apps = apps.filter { app in
                     let stack = [app.name.lowercased(), app.bundleIdentifier.lowercased()]
-                    return nameFilters.contains { needle in stack.contains { $0.contains(needle) } }
+                    let needleLower = nameFilters.map { $0.lowercased() }
+                    return needleLower.contains { needle in stack.contains { $0.contains(needle) || needle.contains($0) } }
                 }
             }
             apps.sort { ($0.name, $0.path) < ($1.name, $1.path) }

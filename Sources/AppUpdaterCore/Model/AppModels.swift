@@ -100,6 +100,9 @@ public struct UpdateInfo: Codable, Hashable, Sendable {
     public var source: SourceKind
     public var newestShortVersion: String
     public var newestBundleVersion: String?
+    /// Build/commit suffix from cask version strings (e.g., "3.11.234,92c8..." → "92c8...")
+    /// nil = no build suffix present, or the source doesn't track it. Informational only.
+    public var newestBuild: String?
     public var downloadURL: URL?
     public var sha256Hex: String?
     public var minimumSystemVersion: String?
@@ -118,6 +121,7 @@ public struct UpdateInfo: Codable, Hashable, Sendable {
         source: SourceKind,
         newestShortVersion: String,
         newestBundleVersion: String? = nil,
+        newestBuild: String? = nil,
         downloadURL: URL? = nil,
         sha256Hex: String? = nil,
         minimumSystemVersion: String? = nil,
@@ -130,6 +134,7 @@ public struct UpdateInfo: Codable, Hashable, Sendable {
         self.source = source
         self.newestShortVersion = newestShortVersion
         self.newestBundleVersion = newestBundleVersion
+        self.newestBuild = newestBuild
         self.downloadURL = downloadURL
         self.sha256Hex = sha256Hex
         self.minimumSystemVersion = minimumSystemVersion
