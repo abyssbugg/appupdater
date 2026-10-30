@@ -477,3 +477,9 @@ Owner: "look EXACTLY like Updatest", correct hybrid, worktrees + subagents. Live
 - Lane C (subagent failed; done by coordinator) merged `478a311`: Updatest layout in Sources/AppUpdaterApp/Views/Main/; window-clipping root cause (scene min 640 < view min 940); Bionic (`+8` semver metadata → installed unparseable) and Telegram Desktop (same-named cask, other vendor's quit id) false positives fixed + LiveFalsePositiveTests (7). Gate 869/74, lint 0, live Updates (3) = cmux/Hermes/Warp.
 - Lane D rejected (deleted 8 behavior tests; badge ignored rules). Redo open.
 - Unverified: detail pane live capture (AX click tooling failed); Update All on a real app (owner-run boundary).
+
+### 2026-10-30 (later) — Updatest-parity round 2 + menu-bar redo (branch `parity/integration`)
+- `df6b60a`: UI round 2 vs live Updatest (centered capsule tabs + inline search, text-then-glyph Filter/Sort/Source, gray-plate rows, two-band detail, per-app note, ticking footer with honest battery/offline overdue reason); `InstalledApp.checkedAt` now stamped by UpdateCheckEngine (clock seam).
+- `536220b`: lane D redone by coordinator (Updatest native menu; MenuData tests intact); `CheckCacheStore` (last pass restored at launch ONLY through CheckCarryOver vs a fresh scan — live: menu populated 4 s after relaunch with no check run); answering-source captions; Warp `stable_02` false positive root-caused (cask channel label) — live: Updates 3 → 2 (cmux, Hermes; Hermes matches Updatest's own verdict).
+- Gate: 877 tests / 76 suites green, swiftlint 0 errors, bundle rebuilt + relaunched live. Detail pane live-captured (resolves the earlier unverified item).
+- Still unverified: Update All / Update… apply on a real app (owner-run boundary). Intentionally absent: Packages tab, Adopt… button, Updatest Network crowd claims (no server).
