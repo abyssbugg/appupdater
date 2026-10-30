@@ -18,12 +18,12 @@ struct AppIconView: View {
 }
 
 /// One source kind → one user-facing name, everywhere (Updatest captions:
-/// "Homebrew", "Sparkle", "App Store", "GitHub"). `.unknown` carries the
+/// "Homebrew Catalog", "Sparkle", "App Store", "GitHub"). `.unknown` carries the
 /// least-trusted claims (Electron / derived feeds — LOCKED decision 12).
 enum SourceStyle {
     static func label(for kind: SourceKind) -> String {
         switch kind {
-        case .cask: return "Homebrew"
+        case .cask: return "Homebrew Catalog"
         case .sparkle: return "Sparkle"
         case .mas: return "App Store"
         case .github: return "GitHub"

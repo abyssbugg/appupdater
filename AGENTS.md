@@ -14,7 +14,7 @@ You are working in the **AppUpdater** project. This file is the canonical contin
 |---|---|
 | **Name** | **`AppUpdater`** |
 | **Local path** | `/Users/datamatics/dev/appupdater` |
-| **Canonical remote** | `github.com/abyssbugg/appupdater` (PRIVATE — created 2026-10-26; source of truth for pull/push) |
+| **Canonical remote** | `github.com/abyssbugg/appupdater` (created PRIVATE 2026-10-26; **observed PUBLIC 2026-10-30** via `gh repo view --json visibility` — owner to confirm intended visibility; source of truth for pull/push) |
 | **Live surfaces** | none yet (planned: signed/notarized macOS app; self-updates via Sparkle appcast; no owner-operated server required for v1) |
 | **Phase** | prototype (code build starting; analysis phase complete) |
 | **Owner intent** | hybrid macOS app updater combining MacUpdater's execution engine (scan, one-click install, backups, privileged install path, scheduler) with Updatest's serverless source strategy (public cask index, app's own Sparkle appcast, GitHub/Electron, App Store lookup). For the owner AND public release. |
