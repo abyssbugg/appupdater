@@ -101,6 +101,24 @@ public struct VerifiedInstallLedger: Sendable {
         return record
     }
 
+    /// THE one suppression rule, shared by the engine (fresh checks) and the
+    /// launch cache restore (cached checks written before a record existed) —
+    /// one resolver per decision, so no path can skip it.
+    public func apply(
+        to check: UpdateCheck,
+        executableHash: (String) -> String? = Self.executableSHA256(appPath:)
+    ) -> UpdateCheck {
+        guard let claim = check.resolved,
+              let record = matchingRecord(for: check.app, claimedVersion: claim.newestShortVersion,
+                                          executableHash: executableHash) else { return check }
+        var suppressed = UpdateCheck(app: check.app, candidates: check.candidates,
+                                     failures: check.failures, resolved: nil)
+        suppressed.verifiedInstallNote = "\(claim.newestShortVersion) was installed and verified on "
+            + "\(record.recordedAt.formatted(.iso8601)); the vendor's bundle declares "
+            + "\(record.installedShortVersion), so the claim is treated as current until the bundle changes"
+        return suppressed
+    }
+
     /// SHA-256 of the bundle's main executable (CFBundleExecutable), or nil.
     public static func executableSHA256(appPath: String) -> String? {
         let bundle = URL(fileURLWithPath: appPath)

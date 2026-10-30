@@ -93,6 +93,22 @@ struct VerifiedInstallLedgerTests {
         #expect(later.verdict == "update")
     }
 
+    /// Launch restore path: a CACHED check written before the record existed
+    /// still says "update"; the shared rule must convert it too.
+    @Test func applyConvertsCachedCheckAndLeavesOthersAlone() throws {
+        let claim = UpdateInfo(source: .github, newestShortVersion: "0.65.2.2",
+                               downloadURL: try #require(URL(string: "https://example.com/victim.dmg")),
+                               confidence: .medium)
+        let cached = UpdateCheck(app: app, candidates: [claim], resolved: claim)
+        #expect(ledger.apply(to: cached) == cached)
+        try ledger.recordIfShortfall(try outcome(claim: "0.65.2.2", final: "0.65.2"))
+        let converted = ledger.apply(to: cached)
+        #expect(converted.verdict == "current")
+        #expect(converted.verifiedInstallNote != nil)
+        let current = UpdateCheck(app: app, candidates: [claim], resolved: nil)
+        #expect(ledger.apply(to: current) == current)
+    }
+
     private struct FixedClaimSource: UpdateSource {
         static var kind: SourceKind { .github }
         var claim: UpdateInfo

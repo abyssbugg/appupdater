@@ -44,8 +44,9 @@ extension AppState {
             guard self.lastChecks.isEmpty else { return }
             let carried = CheckCarryOver.carry(
                 previousChecks: cached.checks, previousApps: cached.apps, newApps: apps)
+            let ledger = VerifiedInstallLedger(directory: self.appSupportDirectory)
             let checks = zip(apps, carried).map { app, check in
-                check ?? UpdateCheck(app: app, candidates: [], resolved: nil)
+                check.map { ledger.apply(to: $0) } ?? UpdateCheck(app: app, candidates: [], resolved: nil)
             }
             self.lastApps = apps
             self.lastChecks = checks

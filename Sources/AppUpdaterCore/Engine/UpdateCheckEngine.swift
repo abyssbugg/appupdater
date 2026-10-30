@@ -122,31 +122,22 @@ public struct UpdateCheckEngine: Sendable {
             }
         }
 
-        var resolved = VersionOracle().resolve(
+        let resolved = VersionOracle().resolve(
             candidates: candidates,
             installedShortVersion: app.shortVersion
         )
-        var verifiedNote: String?
-        if let claim = resolved, let ledger = verifiedInstalls,
-           let record = ledger.matchingRecord(for: app, claimedVersion: claim.newestShortVersion) {
-            resolved = nil
-            verifiedNote = "\(claim.newestShortVersion) was installed and verified on "
-                + "\(record.recordedAt.formatted(.iso8601)); the vendor's bundle declares "
-                + "\(record.installedShortVersion), so the claim is treated as current until the bundle changes"
-        }
         // Stamp WHEN this app was checked: `InstalledApp.checkedAt` existed but
         // was never set, so "Recently Checked" sorting and the detail pane's
         // "checked … ago" had nothing to show (live finding 2026-10-30).
         var checkedApp = app
         checkedApp.checkedAt = now()
-        var check = UpdateCheck(
+        let check = UpdateCheck(
             app: checkedApp,
             candidates: candidates,
             failures: failures,
             resolved: resolved
         )
-        check.verifiedInstallNote = verifiedNote
-        return check
+        return verifiedInstalls?.apply(to: check) ?? check
     }
 
     /// Check many apps concurrently (TaskGroup), returning results in INPUT order so
