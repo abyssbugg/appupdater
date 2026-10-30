@@ -40,12 +40,15 @@ public struct CaskIndexSource: UpdateSource, Sendable {
             !version.isEmpty else {
             return nil // missing/blank version → never synthesize one
         }
+        let (marketingVersion, buildSuffix) = CaskVersion.split(version) // compare marketing only
+
         return UpdateInfo(
             source: .cask,
-            newestShortVersion: version,
+            newestShortVersion: marketingVersion,
             // Cask JSON carries `bundle_version`, but this phase pins
             // newestBundleVersion = nil per the single-cask source's frozen brief.
             newestBundleVersion: nil,
+            newestBuild: buildSuffix,
             downloadURL: Self.downloadURL(from: match.record.url),
             sha256Hex: match.record.sha256?.hex?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
