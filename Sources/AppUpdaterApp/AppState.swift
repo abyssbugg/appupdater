@@ -83,6 +83,18 @@ final class AppState: ObservableObject {
     /// command text, which broke for app names containing spaces).
     @Published private(set) var lastInstallBundleID: String?
 
+    /// The last clicked-install OUTCOME — a real verified apply (user-space)
+    /// or a green pkg staging carrying the owner-run command. Scoped to its
+    /// row via ``lastInstallOutcomeBundleID``; the detail card renders the
+    /// honest receipt from this.
+    @Published private(set) var lastInstallOutcome: InstallOutcome?
+    @Published private(set) var lastInstallOutcomeBundleID: String?
+
+    /// The row a clicked install is currently running for (nil = idle).
+    /// Serialization guard: one install at a time; buttons disable and show
+    /// progress off this.
+    @Published private(set) var installInFlightBundleID: String?
+
     /// Master switch for the LOCAL summary notification (settings pane
     /// toggle; default ON). The distributed fire event is NOT gated on this
     /// — it is the unconditional scriptability surface and fires after every
@@ -730,7 +742,7 @@ final class AppState: ObservableObject {
             openMainWindowFromNotification()
         case .stageInstall(let bundleID, let appName):
             if list.rows.contains(where: { $0.app.bundleIdentifier == bundleID }) {
-                requestInstall(bundleID: bundleID)
+                Task { await requestInstall(bundleID: bundleID) }
             } else {
                 actionError =
                     "Stage Install for \(appName): it is no longer in the current list — run a check and stage it from the window."
@@ -887,45 +899,47 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: Owner-run install boundary
+    // MARK: Clicked-install boundary (the click IS the consent)
 
-    /// LOCKED boundary in action: stages the exact owner-run CLI command
-    /// (pasteboard + verbatim display). NOTHING executes here — the
-    /// surface's honesty is the product: the user reads or copies the
-    /// command and runs it themselves in the terminal.
-    func requestInstall(bundleID: String) {
+    /// The clicked-install entry point (rows, detail card, notifications).
+    /// User-space updates (dmg/zip) run the VERIFIED CHAIN in-process —
+    /// exactly the sequence `appupdater-cli install --apps <name> --apply`
+    /// runs (plan → download → HTTPS + SHA-256 + artifact-magic verify →
+    /// backup → quit → swap → postScan); receipts publish verbatim. A green
+    /// .pkg staging instead surfaces the owner-run command (pasteboard +
+    /// verbatim display) — installer(8) is NEVER executed by this app,
+    /// unchanged. Serialized: one install at a time (installs are heavy);
+    /// refusals and aborts surface honestly via ``actionError``.
+    func requestInstall(bundleID: String) async {
+        guard installInFlightBundleID == nil else { return }
         guard let row = list.rows.first(where: { $0.app.bundleIdentifier == bundleID }) else {
             return
         }
-        let name = row.app.name
-        // Minimal honest shell-quoting: quotes around anything with spaces,
-        // embedded quotes escaped (CJK app names pass through unquoted).
-        let needsQuotes = name.contains(" ") || name.contains("\"")
-        let escaped = name.replacingOccurrences(of: "\"", with: "\\\"")
-        let shellSafe = needsQuotes ? "\"\(escaped)\"" : escaped
-        var command =
-            "swift run appupdater-cli install --apps \(shellSafe) --apply"
-        // Make the staged command runnable from ANY directory: a dev bundle
-        // lives at <repo>/build/AppUpdater.app — prefix the cd when that repo
-        // layout is real. Released bundles stage the bare command (the repo
-        // checkout is where the CLI exists; the UI copy says so).
-        let bundleURL = Bundle.main.bundleURL
-        let repoRoot = bundleURL
-            .deletingLastPathComponent()   // build/
-            .deletingLastPathComponent()   // <repo>
-        // A dev bundle sits at <repo>/build/AppUpdater.app; a real Package.swift
-        // at the computed root is the trustworthy signal of that layout.
-        if FileManager.default.fileExists(
-            atPath: repoRoot.appendingPathComponent("Package.swift").path) {
-            let path = repoRoot.path
-            let quotedPath = path.contains(" ") ? "\"\(path)\"" : path
-            command = "cd \(quotedPath) && " + command
+        installInFlightBundleID = bundleID
+        defer { installInFlightBundleID = nil }
+        do {
+            let outcome = try await performClickedInstall(row: row)
+            lastInstallOutcome = outcome
+            lastInstallOutcomeBundleID = bundleID
+            if let staged = outcome.stagedCommand, outcome.abortedStep == nil {
+                lastInstallCommand = staged
+                lastInstallBundleID = bundleID
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(staged, forType: .string)
+            } else {
+                // A real apply (or an abort): drop any stale staged command
+                // so the card shows THIS outcome, not a dead command.
+                lastInstallCommand = nil
+                lastInstallBundleID = nil
+            }
+            if let aborted = outcome.abortedStep {
+                actionError =
+                    "Install for \(row.app.name) aborted at \(aborted.rawValue) — the receipt shows how far it got; nothing was left half-done silently."
+            }
+        } catch {
+            actionError = "Install for \(row.app.name) refused: \(error.localizedDescription)"
         }
-        lastInstallCommand = command
-        lastInstallBundleID = bundleID
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(command, forType: .string)
     }
 
     /// Menu "View Details": open the window with this row preselected.

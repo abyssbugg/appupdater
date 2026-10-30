@@ -170,7 +170,7 @@ struct MenuBarView: View {
         case .quit:
             NSApplication.shared.terminate(nil)
         case .installNow(let bundleID):
-            appState.requestInstall(bundleID: bundleID)
+            Task { await appState.requestInstall(bundleID: bundleID) }
         case .viewDetails(let bundleID):
             appState.showDetails(bundleID: bundleID)
             showMainWindow()

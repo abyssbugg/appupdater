@@ -548,8 +548,8 @@ struct AppRowView: View {
             StatusPill(verdict: row.check?.verdict)
             if row.updateAvailable && !row.app.isMacAppStore {
                 Button {
-                    appState.requestInstall(bundleID: row.app.bundleIdentifier)
                     appState.showDetails(bundleID: row.app.bundleIdentifier)
+                    Task { await appState.requestInstall(bundleID: row.app.bundleIdentifier) }
                 } label: {
                     Label("Install…", systemImage: "arrow.down.circle")
                         .font(.caption.weight(.semibold))
@@ -558,7 +558,14 @@ struct AppRowView: View {
                 .controlSize(.small)
                 .buttonStyle(.bordered)
                 .tint(.orange)
-                .help("Stage the verified install command — copied to the clipboard, nothing runs until you run it; the detail pane shows it")
+                .disabled(appState.installInFlightBundleID != nil)
+                .help(
+                    "Installs the update: user-space updates run the verified chain in-app "
+                        + "(download → HTTPS + SHA-256 → backup → swap); .pkg updates stage a command you run")
+                if appState.installInFlightBundleID == row.app.bundleIdentifier {
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
         }
         .padding(.vertical, 3)
@@ -727,15 +734,50 @@ private struct DetailInspector: View {
 
             if row.updateAvailable && !row.app.isMacAppStore {
                 Button {
-                    appState.requestInstall(bundleID: row.app.bundleIdentifier)
+                    Task { await appState.requestInstall(bundleID: row.app.bundleIdentifier) }
                 } label: {
-                    Label("Stage Install Command", systemImage: "doc.on.doc")
+                    Label(appState.installInFlightBundleID == row.app.bundleIdentifier ? "Installing…" : "Install",
+                          systemImage: "doc.on.doc")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
-                if let command = appState.lastInstallCommand,
-                   appState.lastInstallBundleID == row.app.bundleIdentifier {
+                .disabled(appState.installInFlightBundleID != nil)
+                if appState.installInFlightBundleID == row.app.bundleIdentifier {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Working — download → verify (HTTPS + SHA-256 + artifact magic) → backup → quit → swap…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let outcome = appState.lastInstallOutcome,
+                          appState.lastInstallOutcomeBundleID == row.app.bundleIdentifier,
+                          let aborted = outcome.abortedStep {
+                    Label("Aborted at \(aborted.rawValue) — the receipt shows how far it got; nothing was left half-done silently.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                } else if let outcome = appState.lastInstallOutcome,
+                          appState.lastInstallOutcomeBundleID == row.app.bundleIdentifier,
+                          outcome.stagedCommand == nil {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Installed ✓", systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.green)
+                        Text(outcome.finalInstalledShortVersion.map {
+                            "Swap complete — reopening \(row.app.name) shows version \($0)."
+                        } ?? "Swap complete — reopening \(row.app.name) runs the new version.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if outcome.backup != nil {
+                            Text("A backup of the previous version was kept before the swap.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else if let command = appState.lastInstallCommand,
+                          appState.lastInstallBundleID == row.app.bundleIdentifier {
                     Text(command)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
@@ -757,7 +799,10 @@ private struct DetailInspector: View {
                         .help("Opt-in: types the same command into your default terminal (you attend any password prompt)")
                     }
                 } else {
-                    Text("Stages the exact owner-run CLI command — the app never applies installs itself.")
+                    Text(
+                        "Installs user-space updates in-place with the verified chain (download → HTTPS + SHA-256 → "
+                            + "backup → quit → swap) — the same sequence `appupdater-cli install --apply` runs. "
+                            + "A .pkg update instead stages a command YOU run; this app never executes installer(8).")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

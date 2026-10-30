@@ -5,6 +5,35 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-29 — OWNER-REPORTED BUG FIXED: clicked installs never installed anything (now they do)
+
+**Confirmed (owner report + code read):** "I can't update any of the apps that say an
+update is available." Root cause: `requestInstall` — the ONLY install affordance (rows,
+detail card, menu, notifications) — NEVER installed anything. It built a
+`swift run appupdater-cli install … --apply` STRING, copied it to the clipboard, and
+displayed it; the detail card even said "the app never applies installs itself." The real
+verified chain (InstallPlanner → InstallCoordinator: download → HTTPS + SHA-256 +
+artifact-magic → backup → quit → swap → postScan) existed and was proven (CLI --apply,
+auto-apply) but was never wired to a click. (A parallel session's transcript about this
+same gap described fixes that landed as `1231519`; the findings.md it promised was never
+written — verified nonexistent on disk.)
+
+**Fix (consent-faithful):** the click IS the consent — `requestInstall` now runs that
+exact in-process sequence (new `AppState+Install.swift` → `performClickedInstall`,
+mirroring the CLI line-for-line including its guards and `relaunchRequested: false`). A
+green user-space apply publishes the verbatim outcome (Installed ✓ + post-scan version +
+backup note in the detail card); a green .pkg staging surfaces the owner-run command
+exactly as before (clipboard + display; installer(8) still never executed by this app).
+Serialized one-at-a-time (buttons disable + progress); refusals/aborts honest via
+`actionError` + the receipt. The staged-CLI-string builder is removed as dead code — the
+app now does what it used to ask the owner to type.
+
+Gate: **839 tests / 71 suites, swiftlint 0 errors**; CI verified per push. No new tests —
+the glue is thin and the underlying chain is the fully-tested coordinator surface the CLI
+and auto-apply already exercise.
+
+---
+
 ## 2026-10-29 — FINAL BACKLOG CLOSED: dormant helper (§6 signed) + glue wiring + post-close polish
 
 **Dormant privileged helper (§6 signed → built, `0ea737f`, coordinator lane):** HelperProtocol
