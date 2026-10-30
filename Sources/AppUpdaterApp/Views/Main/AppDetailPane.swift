@@ -30,33 +30,45 @@ private struct AppDetailContent: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
+        // Two bands like Updatest: a lighter "act" band (header → note) over a
+        // darker "read" band (What's New, Information, Security).
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                actionButtons
-                DetailUpdateStatus(row: row)
-                if let url = row.check?.resolved?.downloadURL, row.check?.verdict == "update" {
-                    downloadBox(url)
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    actionButtons
+                    DetailUpdateStatus(row: row)
+                    if let url = row.check?.resolved?.downloadURL, row.check?.verdict == "update" {
+                        downloadBox(url)
+                    }
+                    if let source = row.check?.resolved?.source {
+                        discoveredCard(source)
+                    }
+                    if row.app.isMacAppStore {
+                        storeNotice
+                    }
+                    noteField
                 }
-                if let source = row.check?.resolved?.source {
-                    discoveredCard(source)
+                .padding(.horizontal, 44)
+                .padding(.vertical, 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.045))
+                VStack(alignment: .leading, spacing: 22) {
+                    whatsNew
+                    informationSection
+                    SecurityPanelSection(row: row)
                 }
-                if row.app.isMacAppStore {
-                    storeNotice
-                }
-                whatsNew
-                informationSection
-                SecurityPanelSection(row: row)
+                .padding(.horizontal, 44)
+                .padding(.vertical, 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     // MARK: header
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .top, spacing: 16) {
             AppIconView(path: row.app.path, size: 96)
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.app.name)
@@ -75,6 +87,7 @@ private struct AppDetailContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .help("Last checked \(checked.formatted(date: .abbreviated, time: .shortened))")
+                    .padding(.top, 6)
             }
         }
     }
@@ -82,9 +95,10 @@ private struct AppDetailContent: View {
     @ViewBuilder
     private var versionHeadline: some View {
         if row.check?.verdict == "update", let info = row.check?.resolved {
-            Text("\(VersionText.installed(row.app)) → \(VersionText.newest(info))")
+            (Text("\(VersionText.installed(row.app)) → ").foregroundStyle(.secondary)
+                + Text(VersionText.newest(info)).fontWeight(.semibold)
+                    .foregroundStyle(row.updateAvailable ? Color.accentColor : .secondary))
                 .font(.title3.monospacedDigit())
-                .foregroundStyle(row.updateAvailable ? Color.accentColor : .secondary)
                 .textSelection(.enabled)
             if row.isMutedUpdate {
                 Text("Muted by one of your rules — shown for the record, not offered.")
@@ -117,37 +131,44 @@ private struct AppDetailContent: View {
     private var actionButtons: some View {
         HStack(alignment: .top, spacing: 10) {
             if row.canUpdateInApp {
-                VStack(spacing: 3) {
+                VStack(spacing: 4) {
                     Button {
                         Task { await appState.requestInstall(bundleID: row.app.bundleIdentifier) }
                     } label: {
                         Text(appState.installInFlightBundleID == row.app.bundleIdentifier
                              ? "Updating…" : "Update…")
-                            .frame(minWidth: 70)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .buttonStyle(CapsuleButtonStyle(large: true))
                     .disabled(appState.installInFlightBundleID != nil)
-                    Text("Verified chain").font(.caption2).foregroundStyle(.secondary)
+                    .help("Download → verify (HTTPS + SHA-256) → back up → replace")
+                    openAppCaption
                 }
-            }
-            VStack(spacing: 3) {
-                Button {
-                    NSWorkspace.shared.openApplication(
-                        at: URL(fileURLWithPath: row.app.path),
-                        configuration: NSWorkspace.OpenConfiguration())
-                } label: {
-                    Text("Open App").frame(minWidth: 70)
+            } else {
+                VStack(spacing: 4) {
+                    Button("Open App") { openApp() }
+                        .buttonStyle(CapsuleButtonStyle(large: true))
+                    Text(row.isRunning ? "Running" : " ").font(.caption2).foregroundStyle(.secondary)
                 }
-                .controlSize(.large)
-                Text(row.isRunning ? "Running" : " ").font(.caption2).foregroundStyle(.secondary)
             }
             optionsMenu
         }
     }
 
+    private var openAppCaption: some View {
+        Button("Open App") { openApp() }
+            .buttonStyle(.plain)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+    }
+
+    private func openApp() {
+        NSWorkspace.shared.openApplication(
+            at: URL(fileURLWithPath: row.app.path),
+            configuration: NSWorkspace.OpenConfiguration())
+    }
+
     private var optionsMenu: some View {
-        Menu {
+        CapsuleMenu(title: "Options", large: true) {
             Toggle("Include in Automatic Checks", isOn: Binding(
                 get: { row.decision.autoCheck },
                 set: { enabled in
@@ -175,11 +196,7 @@ private struct AppDetailContent: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(row.app.bundleIdentifier, forType: .string)
             }
-        } label: {
-            Text("Options")
         }
-        .controlSize(.large)
-        .fixedSize()
     }
 
     // MARK: cards
@@ -189,8 +206,9 @@ private struct AppDetailContent: View {
             Link(destination: url) {
                 Text(url.absoluteString)
                     .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(Color.accentColor)
                     .underline()
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .truncationMode(.middle)
                     .multilineTextAlignment(.leading)
             }
@@ -205,22 +223,74 @@ private struct AppDetailContent: View {
             .help("Copy download URL")
             .accessibilityLabel("Copy download URL")
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black.opacity(0.55)))
     }
 
     private func discoveredCard(_ source: SourceKind) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Discovered via \(SourceStyle.label(for: source))")
-                .font(.headline)
-            Text(SourceStyle.discoverySentence(for: source))
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Discovered via \(SourceStyle.label(for: source))")
+                    .font(.callout.weight(.semibold))
+                Text(SourceStyle.discoverySentence(for: source))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let hint = nextStepHint {
+                    Text(hint)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
+                }
+            }
+            Spacer(minLength: 8)
+            CapsuleMenu(title: "Actions") {
+                if let url = row.check?.resolved?.downloadURL {
+                    Button("Open Download Link") { NSWorkspace.shared.open(url) }
+                    Button("Copy Download Link") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                    }
+                    Divider()
+                }
+                Button("Open App") { openApp() }
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: row.app.path)])
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quinary))
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.06)))
     }
+
+    /// The second paragraph of the card: what the user can do next, true to
+    /// what THIS app can do for THIS row.
+    private var nextStepHint: String? {
+        guard row.check?.verdict == "update" else { return nil }
+        if row.canUpdateInApp {
+            return "Use Update… to download, verify and replace it, or use the download link above."
+        }
+        if row.app.isMacAppStore { return "Open the App Store to update it." }
+        return "Open the app to check for an update, or use the download link above."
+    }
+
+    /// Per-app private note (license key, reminder) — stored locally in the
+    /// app's own defaults; never sent anywhere.
+    private var noteField: some View {
+        TextField("Add a note (license key, reminder, etc.)", text: Binding(
+            get: { UserDefaults.standard.string(forKey: noteKey) ?? "" },
+            set: { UserDefaults.standard.set($0.isEmpty ? nil : $0, forKey: noteKey) }),
+            axis: .vertical)
+            .textFieldStyle(.plain)
+            .lineLimit(2...5)
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.15)))
+    }
+
+    private var noteKey: String { "appNote." + row.app.bundleIdentifier }
 
     private var storeNotice: some View {
         Label("Mac App Store app — updates happen in the App Store; AppUpdater never replaces it here.",

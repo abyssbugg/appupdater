@@ -67,3 +67,21 @@ struct LiveFalsePositiveTests {
         #expect(rec.declaredBundleIdentifiers == ["com.a.One", "com.a.Two"])
     }
 }
+
+/// `InstalledApp.checkedAt` was declared but never set (live finding 2026-10-30).
+struct CheckedAtStampTests {
+    @Test func engineStampsCheckedAtAndRowsKeepIt() async throws {
+        let pinned = Date(timeIntervalSince1970: 1_234_567)
+        let app = InstalledApp(bundleIdentifier: "com.example.Stamp", name: "Stamp", path: "/Applications/Stamp.app")
+        let check = await UpdateCheckEngine(sources: [], now: { pinned }).check(app: app)
+        let stamp = try #require(check.app.checkedAt)
+        #expect(stamp == pinned)
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appupdater-stamp-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RuleStore(directory: dir)
+        let rows = await store.evaluate(apps: [app], checks: [check])
+        #expect(rows.first?.app.checkedAt == stamp)
+    }
+}

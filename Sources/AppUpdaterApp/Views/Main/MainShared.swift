@@ -96,3 +96,44 @@ extension AppRow {
     /// The row can run the in-app verified update chain.
     var canUpdateInApp: Bool { updateAvailable && !app.isMacAppStore }
 }
+
+/// Updatest's soft gray capsule buttons (Update…, Open App, Adopt…).
+struct CapsuleButtonStyle: ButtonStyle {
+    var large = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(large ? .body.weight(.semibold) : .callout.weight(.medium))
+            .padding(.horizontal, large ? 16 : 13)
+            .padding(.vertical, large ? 7 : 5)
+            .background(Capsule().fill(Color.primary.opacity(configuration.isPressed ? 0.22 : 0.12)))
+            .contentShape(Capsule())
+            .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
+/// A menu that looks like Updatest's "Options ⌄" / "Actions ⌄" capsules.
+struct CapsuleMenu<Content: View>: View {
+    let title: String
+    var large = false
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        // macOS draws a Menu label's image BEFORE its text; the chevron is
+        // drawn beside the menu instead so it reads "Options ⌄" like Updatest.
+        HStack(spacing: 6) {
+            Menu(content: content) { Text(title) }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.semibold))
+                .allowsHitTesting(false)
+        }
+        .font(large ? .body.weight(.medium) : .callout.weight(.medium))
+        .padding(.horizontal, large ? 16 : 13)
+        .padding(.vertical, large ? 7 : 5)
+        .background(Capsule().fill(Color.primary.opacity(0.12)))
+    }
+}

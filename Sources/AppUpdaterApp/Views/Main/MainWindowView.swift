@@ -26,27 +26,30 @@ struct MainWindowView: View {
     /// neither `checkedAt` nor the schedule state, so without it the footer
     /// showed the previous scheduled fire after a fresh check (live finding).
     @State private var lastWindowCheckAt: Date?
+    @State private var searchExpanded = false
+    @FocusState private var searchFocused: Bool
 
     private var list: ListViewModel { appState.list }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: .constant(.all)) {
-            AppListPane(sourceFilter: $sourceFilter, compact: $compactRows, onRefresh: refreshNow)
-                .navigationSplitViewColumnWidth(min: 360, ideal: 430, max: 600)
-                .safeAreaInset(edge: .bottom, spacing: 0) { footer }
-                .overlay(alignment: .top) { errorBanner }
-                .toolbar(removing: .sidebarToggle)
-        } detail: {
-            AppDetailPane(row: selectedRow)
-                .environmentObject(appState)
-                .environmentObject(glue)
-                .safeAreaInset(edge: .bottom, spacing: 0) { detailFooter }
+        VStack(spacing: 0) {
+            NavigationSplitView(columnVisibility: .constant(.all)) {
+                AppListPane(sourceFilter: $sourceFilter, compact: $compactRows, onRefresh: refreshNow)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .overlay(alignment: .top) { errorBanner }
+                    .toolbar(removing: .sidebarToggle)
+                    // OUTERMOST on purpose: wrapped inside other modifiers it
+                    // was ignored live (column came out ~270pt, rows wrapped).
+                    .navigationSplitViewColumnWidth(min: 400, ideal: 560, max: 760)
+            } detail: {
+                AppDetailPane(row: selectedRow)
+                    .environmentObject(appState)
+                    .environmentObject(glue)
+                    .background(Color(nsColor: .textBackgroundColor))
+            }
+            footer
         }
         .toolbar { toolbarContent }
-        .searchable(
-            text: Binding(get: { list.query }, set: { list.setQuery($0) }),
-            placement: .toolbar,
-            prompt: "Search")
         .navigationTitle("")
         .sheet(item: $sheet) { which in sheetContent(which) }
         .onChange(of: list.lastError) { _, _ in errorDismissed = false }
@@ -75,22 +78,63 @@ struct MainWindowView: View {
 
     // MARK: toolbar (centered tab capsule)
 
+    /// Updatest's single centered capsule: [Updates (N) | Installed | 🔍].
+    /// The magnifier expands an inline search field inside the capsule.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            Picker("View", selection: Binding(
-                get: { list.filter == .pendingOnly ? MainTab.updates : MainTab.installed },
-                set: { list.setFilter($0 == .updates ? .pendingOnly : .all) })) {
-                Label("Updates (\(list.stats.pending))", systemImage: "arrow.down.circle")
-                    .tag(MainTab.updates)
-                Label("Installed", systemImage: "square.grid.2x2")
-                    .tag(MainTab.installed)
+            HStack(spacing: 2) {
+                tabButton(.updates, title: "Updates (\(list.stats.pending))")
+                tabButton(.installed, title: "Installed")
+                if searchExpanded {
+                    TextField("Search", text: Binding(get: { list.query }, set: { list.setQuery($0) }))
+                        .textFieldStyle(.plain)
+                        .frame(width: 150)
+                        .focused($searchFocused)
+                        .onSubmit { searchFocused = false }
+                        .onExitCommand { closeSearch() }
+                }
+                Button {
+                    if searchExpanded { closeSearch() } else { searchExpanded = true; searchFocused = true }
+                } label: {
+                    Image(systemName: searchExpanded ? "xmark.circle.fill" : "magnifyingglass")
+                        .frame(width: 30, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(searchExpanded ? "Clear search" : "Search apps")
+                .accessibilityLabel(searchExpanded ? "Clear search" : "Search")
             }
-            .pickerStyle(.segmented)
-            .labelStyle(.titleAndIcon)
-            .fixedSize()
+            .padding(3)
+            .background(Capsule().fill(Color.primary.opacity(0.07)))
+            .accessibilityElement(children: .contain)
             .accessibilityLabel("Show updates or installed apps")
         }
+    }
+
+    private var currentTab: MainTab { list.filter == .pendingOnly ? .updates : .installed }
+
+    private func tabButton(_ tab: MainTab, title: String) -> some View {
+        let active = currentTab == tab
+        return Button {
+            list.setFilter(tab == .updates ? .pendingOnly : .all)
+        } label: {
+            Text(title)
+                .font(.callout.weight(active ? .semibold : .regular))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(active ? Color.primary.opacity(0.14) : Color.clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(active ? .primary : .secondary)
+        .accessibilityAddTraits(active ? .isSelected : [])
+    }
+
+    private func closeSearch() {
+        list.setQuery("")
+        searchExpanded = false
+        searchFocused = false
     }
 
     // MARK: footer (honest last/next check)
@@ -100,63 +144,69 @@ struct MainWindowView: View {
             Divider()
             HStack(spacing: 6) {
                 Button(action: refreshNow) {
-                    Image(systemName: "arrow.clockwise")
-                        .symbolEffect(.rotate, isActive: isRefreshing)
+                    // Re-render every 30 s so "just now" ages honestly.
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                    let footerText = footerText(now: context.date)
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.clockwise")
+                            .symbolEffect(.rotate, isActive: isRefreshing)
+                            .foregroundStyle(Color.accentColor)
+                        (Text(footerText.primary).foregroundStyle(Color.accentColor)
+                            + Text(footerText.tail ?? "").foregroundStyle(.secondary))
+                    }
+                    .font(.caption)
+                    .lineLimit(1)
+                    }
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .disabled(isRefreshing)
                 .help("Refresh and check all apps now")
                 .accessibilityLabel("Check for Updates")
-                Text(footerText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
                 Spacer(minLength: 0)
+                toolsMenu
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-        }
-        .background(.bar)
-    }
-
-    private var footerText: String {
-        if isRefreshing { return "Checking…" }
-        let lastRowCheck = list.rows.compactMap(\.app.checkedAt).max()
-        let lastFire = appState.schedule.state.lastFireAt
-        guard let last = [lastRowCheck, lastFire, lastWindowCheckAt].compactMap({ $0 }).max() else {
-            return "Not checked yet"
-        }
-        var text = RelativeText.string(for: last)
-        let interval = appState.schedule.policy.intervalMinutes
-        if interval > 0, let fire = lastFire {
-            let next = fire.addingTimeInterval(TimeInterval(interval * 60))
-            text += next > Date() ? ", next \(RelativeText.string(for: next))" : ", next check due"
-        }
-        return text
-    }
-
-    private var detailFooter: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 12) {
-                Spacer()
-                Menu {
-                    ForEach(SettingsSheet.allCases) { which in
-                        Button(which.title) { sheet = which }
-                    }
-                } label: {
-                    Image(systemName: "wrench.and.screwdriver")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Settings and tools")
-                .accessibilityLabel("Settings and tools")
-            }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .padding(.vertical, 6)
         }
         .background(.bar)
+    }
+
+    private var toolsMenu: some View {
+        Menu {
+            ForEach(SettingsSheet.allCases) { which in
+                Button(which.title) { sheet = which }
+            }
+        } label: {
+            Image(systemName: "wrench.and.screwdriver")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Settings and tools")
+        .accessibilityLabel("Settings and tools")
+    }
+
+    /// ("1 hour ago", ", next in 6 hours") — Updatest's blue time + gray tail.
+    private func footerText(now: Date) -> (primary: String, tail: String?) {
+        if isRefreshing { return ("Checking…", nil) }
+        let lastRowCheck = list.rows.compactMap(\.app.checkedAt).max()
+        let lastFire = appState.schedule.state.lastFireAt
+        guard let last = [lastRowCheck, lastFire, lastWindowCheckAt].compactMap({ $0 }).max() else {
+            return ("Not checked yet", nil)
+        }
+        let policy = appState.schedule.policy
+        let primary = RelativeText.string(for: last, relativeTo: now)
+        guard policy.intervalMinutes > 0 else { return (primary, ", automatic checks off") }
+        // The schedule engine counts from its own last fire; a window check
+        // does not move the schedule.
+        let next = (lastFire ?? last).addingTimeInterval(TimeInterval(policy.intervalMinutes * 60))
+        if next > now { return (primary, ", next \(RelativeText.string(for: next, relativeTo: now))") }
+        // Overdue: say WHY instead of a bare "due" (the engine's own gates,
+        // probed the same way AppState+Decision14 does).
+        let probe = ScheduleEngine(fire: { _ in 0 })
+        if policy.skipOnBattery && probe.isOnBattery() { return (primary, ", automatic checks paused on battery") }
+        if policy.deferWhenOffline && !probe.isOnline() { return (primary, ", waiting for network") }
+        return (primary, ", next check due")
     }
 
     // MARK: banner + refresh

@@ -597,10 +597,12 @@ struct ManualSourceTests {
 
         let withSeam = UpdateCheckEngine(
             sources: [ManualFakeBuiltinSource(counter: withSeamCounter, claim: UpdateInfo(source: .cask, newestShortVersion: "2.0"))],
-            manualSource: service.engineResolver(session: makeSession(), githubCacheDirectory: root)
+            manualSource: service.engineResolver(session: makeSession(), githubCacheDirectory: root),
+            now: { Date(timeIntervalSince1970: 1_000) }
         )
         let plain = UpdateCheckEngine(
-            sources: [ManualFakeBuiltinSource(counter: plainCounter, claim: UpdateInfo(source: .cask, newestShortVersion: "2.0"))]
+            sources: [ManualFakeBuiltinSource(counter: plainCounter, claim: UpdateInfo(source: .cask, newestShortVersion: "2.0"))],
+            now: { Date(timeIntervalSince1970: 1_000) }
         )
 
         let seamCheck = await withSeam.check(app: app)

@@ -35,12 +35,14 @@ struct AppListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             controlsBar
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 6)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 10)
+            Divider()
             header
-                .padding(.horizontal, 14)
-                .padding(.bottom, 4)
+                .padding(.horizontal, 18)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
             if visibleRows.isEmpty {
                 emptyState
             } else {
@@ -68,6 +70,7 @@ struct AppListPane: View {
             .accessibilityLabel("Toggle compact rows")
         }
         .font(.callout)
+        .foregroundStyle(.secondary)
     }
 
     private var filterMenu: some View {
@@ -87,11 +90,12 @@ struct AppListPane: View {
                 Text("Skipped Updates (\(muted))")
             }
         } label: {
-            Label("Filter", systemImage: "line.3.horizontal.decrease")
-                .labelStyle(.titleAndIcon)
+            Text("Filter")
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
+        .trailingGlyph("line.3.horizontal.decrease")
         .accessibilityLabel("Filter apps")
     }
 
@@ -105,11 +109,12 @@ struct AppListPane: View {
             }
             .pickerStyle(.inline)
         } label: {
-            Label("Sort", systemImage: "line.3.horizontal")
-                .labelStyle(.titleAndIcon)
+            Text("Sort")
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
+        .trailingGlyph("line.3.horizontal")
         .accessibilityLabel("Sort apps")
     }
 
@@ -128,11 +133,12 @@ struct AppListPane: View {
             }
             .pickerStyle(.inline)
         } label: {
-            Label("Source", systemImage: "square.on.square")
-                .labelStyle(.titleAndIcon)
+            Text("Source")
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
+        .trailingGlyph("square.on.square")
         .accessibilityLabel("Filter by update source")
     }
 
@@ -147,7 +153,8 @@ struct AppListPane: View {
         let updatable = visibleRows.filter(\.canUpdateInApp)
         return HStack {
             Text("\(title) (\(visibleRows.count))")
-                .font(.headline)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
             Spacer()
             if list.filter == .pendingOnly, updatable.count > 1 {
                 Button("Update All") {
@@ -158,7 +165,7 @@ struct AppListPane: View {
                         for id in ids { await appState.requestInstall(bundleID: id) }
                     }
                 }
-                .controlSize(.small)
+                .buttonStyle(CapsuleButtonStyle())
                 .disabled(appState.installInFlightBundleID != nil)
                 .help("Runs each update in turn through the verified chain")
             }
@@ -167,15 +174,30 @@ struct AppListPane: View {
 
     // MARK: rows
 
+    /// Custom rows instead of `List(selection:)`: Updatest's selection is a
+    /// quiet gray rounded plate, not the system accent highlight.
     private var rowsList: some View {
-        List(selection: Binding(get: { list.selection }, set: { list.select($0) })) {
-            ForEach(visibleRows) { row in
-                AppRowView(row: row, compact: compact)
-                    .tag(row.id)
+        ScrollView {
+            LazyVStack(spacing: 2) {
+                ForEach(visibleRows) { row in
+                    let selected = list.selection == row.id
+                    AppRowView(row: row, compact: compact)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, compact ? 4 : 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(selected ? Color.primary.opacity(0.17) : Color.clear))
+                        .contentShape(Rectangle())
+                        .onTapGesture { list.select(row.id) }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+                        .accessibilityLabel(row.app.name)
+                        .accessibilityAction { list.select(row.id) }
+                }
             }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
     }
 
     private var emptyState: some View {
@@ -254,6 +276,7 @@ struct AppRowView: View {
                 versionLine
                 if !compact { sourceLine }
             }
+            .layoutPriority(1)
             Spacer(minLength: 8)
             trailing
         }
@@ -265,9 +288,12 @@ struct AppRowView: View {
         if row.check?.verdict == "update", let info = row.check?.resolved {
             HStack(spacing: 4) {
                 Text(row.app.shortVersion ?? "?")
-                Text("→")
-                Text(VersionText.newest(info))
-                    .foregroundStyle(row.updateAvailable ? Color.accentColor : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "arrow.right").font(.caption2)
+                Text(info.newestShortVersion)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(row.updateAvailable ? Color.primary : .secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -288,7 +314,7 @@ struct AppRowView: View {
         if let source = row.check?.resolved?.source {
             Text(SourceStyle.label(for: source))
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         } else if let verdict = row.check?.verdict {
             HStack(spacing: 3) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -318,7 +344,8 @@ struct AppRowView: View {
                         appState.showDetails(bundleID: row.app.bundleIdentifier)
                         Task { await appState.requestInstall(bundleID: row.app.bundleIdentifier) }
                     }
-                    .controlSize(.small)
+                    .buttonStyle(CapsuleButtonStyle())
+                    .fixedSize()
                     .disabled(appState.installInFlightBundleID != nil)
                     .help(appState.installInFlightBundleID != nil
                           ? "Another update is running — updates run one at a time"
@@ -326,6 +353,7 @@ struct AppRowView: View {
                 }
                 if !compact {
                     Button("Open App") { openApp() }
+                        .fixedSize()
                         .buttonStyle(.plain)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -344,5 +372,16 @@ struct AppRowView: View {
         NSWorkspace.shared.openApplication(
             at: URL(fileURLWithPath: row.app.path),
             configuration: NSWorkspace.OpenConfiguration())
+    }
+}
+
+/// Updatest's control labels: title first, glyph after (macOS would draw a
+/// Menu label's image first, so the glyph sits beside the menu).
+extension View {
+    func trailingGlyph(_ symbol: String) -> some View {
+        HStack(spacing: 5) {
+            self
+            Image(systemName: symbol).font(.caption).allowsHitTesting(false)
+        }
     }
 }
