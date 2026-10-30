@@ -49,7 +49,7 @@ struct ScheduleSettingsView: View {
                             .textSelection(.enabled)
                     }
                     Text("When exactly one app newly pends, its notification carries actions: "
-                        + "Open AppUpdater and Install Update (runs the verified install "
+                        + "Open AppUpdater and Update (runs the verified update "
                         + "chain in-app; a .pkg update stages a command you run instead). "
                         + "Other fires stay quiet summaries.")
                         .font(.caption2)

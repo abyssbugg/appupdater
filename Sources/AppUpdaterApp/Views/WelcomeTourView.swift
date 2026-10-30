@@ -30,10 +30,10 @@ struct WelcomeTourView: View {
                     + "which apps have a newer version. Apps it cannot verify are labeled unknown, never guessed.")
             section(
                 icon: "hand.tap", tint: .orange,
-                title: "Nothing installs by itself",
-                body: "Installs are click-driven: a button stages the exact update command, and you run it "
-                    + "yourself in your terminal. Automatic applying exists but is strictly opt-in per app, "
-                    + "and off by default.")
+                title: "Nothing updates by itself",
+                body: "Updates are click-driven: Update… downloads, verifies (HTTPS + SHA-256), backs up and "
+                    + "replaces the app. A .pkg update instead stages a command you run yourself. Automatic "
+                    + "updating exists but is strictly opt-in per app, and off by default.")
             section(
                 icon: "checkmark.shield", tint: .green,
                 title: "First launch on macOS",
