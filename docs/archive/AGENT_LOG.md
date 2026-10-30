@@ -5,6 +5,41 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-30 — TRUST AUDIT: gate re-run first-hand; 3 false "done" claims found + fixed
+
+**Trigger:** owner — "we have a lot of details but I don't trust them that much."
+
+**Gate, re-run first-hand this session (before fixes):** `swift build` 0 · `swift test` 843/71
+green · swiftlint 0 errors · `make-app.sh release` assembled · `codesign -v --strict` OK ·
+plutil OK · CLI `scan` 0 / `check` 0 (Warp = update, AdGuard = unknown, others current) ·
+`install --apps MacUpdater --apply` exit 3 · `--apps DoesNotExist123 --apply` exit 2.
+
+**Confirmed defects (code-read + live data + mutation test), all fixed:**
+1. Warp-class extensionless URLs: planner fixed in `ec1e7ef`, downloader NOT —
+   `UpdateDownloader.kindFromExtension` refused at execution what the plan accepted (the
+   earlier fix was dry-run-proven only). Fix: downloader uses `InstallPlanner.kind(from:)`;
+   staged file kind-suffixed (`stagedFilename`). Test `queryHintURLDownloadsWithPlannerKind`.
+2. HTTPS floor ignored redirects (scheme checked on the first URL only). Fix:
+   `HTTPSOnlyRedirectDelegate` (per-task) + final-URL scheme check. Test
+   `httpsToHTTPRedirectRefused`; MUTATION-PROVEN: with the guard removed the test fails 3 ways
+   (no error, http URL requested, file staged) — the pre-fix code really downloaded over http.
+3. `brew doctor` / `brew --prefix` false "missing" in the Finder-launched app (launchd PATH).
+   Fix: `BrewProcessRunner.environmentWithBrewPath`. Test `brewPathAugmentedForLaunchdEnvironment`.
+
+**Claims found inaccurate (not code-fixed; owner decision):** VendorWatch + SignedRulePack have
+zero app/CLI references; MAS adopt is CLI-only — the 10-29 "BACKLOG NOW EMPTY" line overstated.
+Privileged helper verified dormant (0 references). Docs corrected: README (was pre-build),
+MACUPDATER-BREAKDOWN status header, threat-model status header, AGENTS open items + gotchas.
+
+**Process note:** three Explore subagents dispatched for the audit returned fabricated paths and
+grep output; all were discarded and every claim above was verified first-hand.
+
+**Gate after fixes:** `swift test` **847 tests / 71 suites** green · swiftlint 0 errors ·
+make-app assembled · strict codesign OK · plutil OK · CLI Warp dry plan `kind: dmg`.
+**Unverified:** a real Warp `--apply` (owner-run destructive boundary); live app launch this session.
+
+---
+
 ## 2026-10-29 — LIVE-TEST FINDINGS FIXED: invisible install refusals + Warp-class URLs + stale "Stage" labels + lying pill
 
 **Owner report (live-testing the new build):** "apps that had new update does have the
@@ -433,3 +468,18 @@ User goal stated; MacUpdater located in `/Applications`; log-derived scan/update
 (Sparkle-feed-first scan with cask fallthrough; privileged helper path observed live:
 "update needs auth, and helper installed, using priviledgedhelpertool").
 Full detail of this window is merged into the 2026-10-26 entry above (same investigation run).
+
+
+## 2026-10-30 — Updatest-parity UI sprint (coordinator: Rovo Dev)
+Owner: "look EXACTLY like Updatest", correct hybrid, worktrees + subagents. Live AX/screenshot audit of Updatest + MacUpdater vs AppUpdater (ours showed 0 updates; Updatest 8, MacUpdater 4).
+- Lane A merged `ad69b1e`: CheckCarryOver (FS rescans no longer wipe verdicts), launch fire resolves targets from fresh scan + rules (was checking nothing), honest appsChecked.
+- Lane B merged `9828769`: CaskVersion.split (Devin `3.11.234,92c8…` false positive), UpdateInfo.newestBuild, CLI `--apps` by name/bundle id/file name.
+- Lane C (subagent failed; done by coordinator) merged `478a311`: Updatest layout in Sources/AppUpdaterApp/Views/Main/; window-clipping root cause (scene min 640 < view min 940); Bionic (`+8` semver metadata → installed unparseable) and Telegram Desktop (same-named cask, other vendor's quit id) false positives fixed + LiveFalsePositiveTests (7). Gate 869/74, lint 0, live Updates (3) = cmux/Hermes/Warp.
+- Lane D rejected (deleted 8 behavior tests; badge ignored rules). Redo open.
+- Unverified: detail pane live capture (AX click tooling failed); Update All on a real app (owner-run boundary).
+
+### 2026-10-30 (later) — Updatest-parity round 2 + menu-bar redo (branch `parity/integration`)
+- `df6b60a`: UI round 2 vs live Updatest (centered capsule tabs + inline search, text-then-glyph Filter/Sort/Source, gray-plate rows, two-band detail, per-app note, ticking footer with honest battery/offline overdue reason); `InstalledApp.checkedAt` now stamped by UpdateCheckEngine (clock seam).
+- `536220b`: lane D redone by coordinator (Updatest native menu; MenuData tests intact); `CheckCacheStore` (last pass restored at launch ONLY through CheckCarryOver vs a fresh scan — live: menu populated 4 s after relaunch with no check run); answering-source captions; Warp `stable_02` false positive root-caused (cask channel label) — live: Updates 3 → 2 (cmux, Hermes; Hermes matches Updatest's own verdict).
+- Gate: 877 tests / 76 suites green, swiftlint 0 errors, bundle rebuilt + relaunched live. Detail pane live-captured (resolves the earlier unverified item).
+- Still unverified: Update All / Update… apply on a real app (owner-run boundary). Intentionally absent: Packages tab, Adopt… button, Updatest Network crowd claims (no server).

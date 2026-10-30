@@ -117,6 +117,27 @@ struct CaskRecord: Decodable, Sendable {
         return names
     }
 
+    /// Bundle identifiers the cask itself declares through `uninstall` / `zap`
+    /// `quit` directives — the app it owns, in the cask author's own words.
+    /// Empty when the cask declares none (most casks): absence is NOT evidence.
+    var declaredBundleIdentifiers: [String] {
+        var ids: [String] = []
+        guard case .array(let directives) = artifacts else { return ids }
+        for directive in directives {
+            guard case .object(let keys) = directive else { continue }
+            for stanza in ["uninstall", "zap"] {
+                guard let value = keys[stanza] else { continue }
+                let entries: [CaskJSONValue]
+                if case .array(let items) = value { entries = items } else { entries = [value] }
+                for entry in entries {
+                    guard case .object(let fields) = entry, let quit = fields["quit"] else { continue }
+                    CaskJSONValue.collectStrings(from: quit, into: &ids)
+                }
+            }
+        }
+        return ids
+    }
+
     /// `pkg` artifact values of this cask — the `.pkg` installers it claims to
     /// hand to installer(8). Mirror of `artifactAppNames`' walk (same recursive
     /// flattening of nested arrays/bare strings). Deliberately NOT read from
@@ -164,7 +185,29 @@ enum CaskMatching {
     static func caskMatchesInstalledApp(_ record: CaskRecord, for app: InstalledApp) -> Bool {
         let pathBasename = (app.path as NSString).lastPathComponent
         let installed = Set([normalizeBundleName(app.name), normalizeBundleName(pathBasename)])
-        return record.artifactAppNames.contains { installed.contains(normalizeBundleName($0)) }
+        guard record.artifactAppNames.contains(where: { installed.contains(normalizeBundleName($0)) }) else {
+            return false
+        }
+        return !bundleIdentifiersContradict(record.declaredBundleIdentifiers, app.bundleIdentifier)
+    }
+
+    /// A same-named `.app` from a DIFFERENT vendor is a different app: the
+    /// `telegram` cask quits `ru.keepcoder.Telegram`, while an installed
+    /// `Telegram.app` with id `com.tdesktop.Telegram` is Telegram Desktop
+    /// (false-positive update 7.3.4 → 13.1.0, found live 2026-10-30).
+    /// Contradiction = the cask declares ids and NONE shares the installed
+    /// app's reverse-DNS vendor prefix (first two components, case-insensitive).
+    /// Same-vendor helper ids (`com.foo.App.Helper`) never contradict; a cask
+    /// declaring nothing never contradicts.
+    static func bundleIdentifiersContradict(_ declared: [String], _ installedID: String) -> Bool {
+        guard !declared.isEmpty, let vendor = vendorPrefix(installedID) else { return false }
+        return !declared.contains { vendorPrefix($0) == vendor }
+    }
+
+    static func vendorPrefix(_ bundleID: String) -> String? {
+        let parts = bundleID.lowercased().split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        return parts[0] + "." + parts[1]
     }
 
     /// Case-insensitive comparison form; ".app" suffix dropped.

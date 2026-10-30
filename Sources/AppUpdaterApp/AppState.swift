@@ -241,8 +241,8 @@ final class AppState: ObservableObject {
 
     /// The authoritative last pipeline outputs; every re-evaluation (rule
     /// mutation, scheduled fire) rebuilds rows from this pair.
-    private var lastApps: [InstalledApp] = []
-    private var lastChecks: [UpdateCheck] = []
+    var lastApps: [InstalledApp] = []
+    var lastChecks: [UpdateCheck] = []
     private var engineTask: Task<Void, Never>?
 
     /// The FS-event monitor consumer task (inventory-refresh scope only).
@@ -322,6 +322,7 @@ final class AppState: ObservableObject {
         applyLaunchDisplayState(display)
         presentWelcomeTourIfNeeded()
         armDockBadgeObserver()
+        restoreLastChecks()
         startScheduler()
         startFileSystemMonitor()
     }
@@ -347,13 +348,6 @@ final class AppState: ObservableObject {
     /// neither-pending-nor-current stance, stated in MenuData's docs).
     var upToDateCount: Int {
         list.rows.filter { $0.check?.verdict == "current" }.count
-    }
-
-    /// Dynamic menu-bar title: pending count shown only when nonzero (the
-    /// MenuData counts contract — 0 shows nothing, never a fake number).
-    var menuBarTitle: String {
-        let pending = list.rows.filter { $0.updateAvailable }.count
-        return pending > 0 ? "AppUpdater · \(pending)" : "AppUpdater"
     }
 
     // MARK: Scheduling lifecycle (engine stream consumer + persistence)
@@ -448,34 +442,52 @@ final class AppState: ObservableObject {
     /// and touches ``lastScheduledPendingNames`` — scheduled fires only.
     func scheduledFire(_ ids: [String]?) async throws -> Int {
         let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
+        // nil ids = the list had nothing to supply (always true at launch, before
+        // any rows exist). Resolve targets from THIS scan + the rules' autoCheck
+        // decisions (default ON; `.noAutoCheck` opts out), so the first fire
+        // really checks. Inventory-only remains only when every app opted out.
+        let wanted: Set<String>
         if let ids {
-            let wanted = Set(ids)
-            let targets = apps.filter { wanted.contains($0.bundleIdentifier) }
-            let checks = await UpdateCheckEngine(
-                sources: await checkSources(),
-                manualSource: manualSourceResolver.engineResolver(
-                    session: proxySession.session, githubCacheDirectory: appSupportDirectory),
-                feedDerivation: FeedDerivationResolver { app in
-                    SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
-                }
-            ).checkAll(apps: targets)
-            lastApps = apps
-            lastChecks = checks
-            let evaluated = await rules.evaluate(apps: apps, checks: checks)
-            await list.setRows(evaluated)
-            await recordScheduledFireOutcome(appsChecked: targets.count, evaluatedRows: evaluated)
-            // Decision-14: after checks + rules, the opt-in auto-apply pass
-            // runs (master OFF by default → this reads one settings file and
-            // returns; opted-in apps are gated, applied, and receipted).
-            lastAutoApplyReceipt = await runAutoApplyPass(evaluated: evaluated)
-            return targets.count
+            wanted = Set(ids)
+        } else {
+            let decided = await rules.evaluate(apps: apps, checks: [])
+            wanted = Set(decided.filter { $0.decision.autoCheck }.map { $0.app.bundleIdentifier })
         }
+        let targets = apps.filter { wanted.contains($0.bundleIdentifier) }
+        guard !targets.isEmpty else {
+            lastChecks = carriedChecks(for: apps)
+            lastApps = apps
+            let evaluated = await rules.evaluate(apps: apps, checks: lastChecks)
+            await list.setRows(evaluated)
+            // Honest: no source was consulted in an inventory-only fire.
+            await recordScheduledFireOutcome(appsChecked: 0, evaluatedRows: evaluated)
+            return 0
+        }
+        let checks = await UpdateCheckEngine(
+            sources: await checkSources(),
+            manualSource: manualSourceResolver.engineResolver(
+                session: proxySession.session, githubCacheDirectory: appSupportDirectory),
+            feedDerivation: FeedDerivationResolver { app in
+                SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
+            }
+        ).checkAll(apps: targets)
         lastApps = apps
-        lastChecks = []
-        let evaluated = await rules.evaluate(apps: apps, checks: [])
+        lastChecks = checks
+        let evaluated = await rules.evaluate(apps: apps, checks: checks)
+        persistLastChecks()
         await list.setRows(evaluated)
-        await recordScheduledFireOutcome(appsChecked: apps.count, evaluatedRows: evaluated)
-        return apps.count
+        await recordScheduledFireOutcome(appsChecked: targets.count, evaluatedRows: evaluated)
+        // Decision-14: opt-in auto-apply pass (master OFF by default).
+        lastAutoApplyReceipt = await runAutoApplyPass(evaluated: evaluated)
+        return targets.count
+    }
+
+    /// Prior verdicts carried onto a fresh scan (`CheckCarryOver`): unchanged
+    /// apps keep their check; new, moved, or self-updated apps get an
+    /// unchecked placeholder. No source is consulted (LOCKED decision 13).
+    func carriedChecks(for apps: [InstalledApp]) -> [UpdateCheck] {
+        let carried = CheckCarryOver.carry(previousChecks: lastChecks, previousApps: lastApps, newApps: apps)
+        return zip(apps, carried).map { app, check in check ?? UpdateCheck(app: app, candidates: [], resolved: nil) }
     }
 
     // MARK: Gap-sprint wiring (scan roots, source roster, FS monitor)
@@ -487,7 +499,7 @@ final class AppState: ObservableObject {
     /// their honest missing-dot); a failed store read never silently drops
     /// locations — it surfaces verbatim in ``scanLocationsError`` and the
     /// scan proceeds on the base roots alone.
-    private func effectiveScanDirectories() -> [URL] {
+    func effectiveScanDirectories() -> [URL] {
         var roots = scanDirectories
         do {
             for resolved in try scanLocationStore.resolvedRoots() {
@@ -572,9 +584,11 @@ final class AppState: ObservableObject {
     func refreshInventoryOnly() async {
         do {
             let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
+            // Verdicts survive a folder change; only changed/vanished apps lose theirs.
+            let checksForEvaluation = carriedChecks(for: apps)
             lastApps = apps
-            lastChecks = []
-            let evaluated = await rules.evaluate(apps: apps, checks: [])
+            lastChecks = checksForEvaluation
+            let evaluated = await rules.evaluate(apps: apps, checks: checksForEvaluation)
             await list.setRows(evaluated)
         } catch {
             actionError = "rescan after a folder change failed — \(error)"
@@ -723,7 +737,7 @@ final class AppState: ObservableObject {
                         options: [.foreground]),
                     UNNotificationAction(
                         identifier: NotificationActionIDs.actionStageInstall,
-                        title: "Install Update",
+                        title: "Update",
                         options: []),
                 ],
                 intentIdentifiers: [],
@@ -755,7 +769,7 @@ final class AppState: ObservableObject {
                 Task { await requestInstall(bundleID: bundleID) }
             } else {
                 actionError =
-                    "Install for \(appName): it is no longer in the current list — run a check and install it from the window."
+                    "Update for \(appName): it is no longer in the current list — run a check and update it from the window."
             }
         case .ignored:
             break
@@ -854,6 +868,7 @@ final class AppState: ObservableObject {
         ).checkAll(apps: apps)
         lastApps = apps
         lastChecks = checks
+        persistLastChecks()
         return await rules.evaluate(apps: apps, checks: checks)
     }
 
@@ -949,7 +964,7 @@ final class AppState: ObservableObject {
             }
             if let aborted = outcome.abortedStep {
                 let message =
-                    "Install for \(row.app.name) aborted at \(aborted.rawValue) — the receipt shows how far it got; nothing was left half-done silently."
+                    "Update for \(row.app.name) stopped at \(aborted.rawValue) — the receipt shows how far it got; nothing was left half-done silently."
                 lastInstallError = message
                 lastInstallErrorBundleID = bundleID
                 actionError = message
@@ -957,7 +972,7 @@ final class AppState: ObservableObject {
         } catch {
             // Surface the refusal where the user IS (the detail card), not
             // only on the list column's banner — see lastInstallError's doc.
-            lastInstallError = "Install for \(row.app.name) refused: \(error.localizedDescription)"
+            lastInstallError = "Update for \(row.app.name) refused: \(error.localizedDescription)"
             lastInstallErrorBundleID = bundleID
             actionError = lastInstallError
         }
@@ -970,5 +985,3 @@ final class AppState: ObservableObject {
         }
     }
 }
-
-// (NotificationResponseDelegate moved to its own file for the file_length gate; wiring above unchanged.)

@@ -1,7 +1,9 @@
 # Breakdown: macOS App Updates + MacUpdater — for building our own updater
 
-> **Status: analysis only — nothing built yet.** Confirmed project decisions live in the
-> project root `README.md` (`~/dev/appupdater`). Working name: **AppUpdater** (hybrid:
+> **Status: pre-build analysis (written 2026-10-26) — the product has since been BUILT;**
+> this file remains the reference for MacUpdater's mechanics and the original design. §3.4's
+> open decisions were all answered — the binding versions are AGENTS.md's LOCKED decisions
+> (which supersede README-era wording, e.g. notarization is abandoned). Working name: **AppUpdater** (hybrid:
 > MacUpdater engine + Updatest source strategy). All conclusions below are grounded in evidence
 > gathered from the shipped app (`/Applications/MacUpdater.app` v3.5.0/17599, arm64 Mach-O,
 > SHA-256 `e45dfe7db90b…1e870`), its runtime artifacts, internet endpoints, and REA/Hopper

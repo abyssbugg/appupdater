@@ -314,8 +314,12 @@ public struct RuleStore: Sendable {
             )
             rules = []
         }
-        return apps.map { app in
-            let check = checks.first { $0.app.bundleIdentifier == app.bundleIdentifier }
+        return apps.map { inventoryApp in
+            let check = checks.first { $0.app.bundleIdentifier == inventoryApp.bundleIdentifier }
+            // The row shows the INVENTORY app (fresh disk truth) but must keep
+            // the check's timestamp — otherwise every row reads "never checked".
+            var app = inventoryApp
+            if let stamp = check?.app.checkedAt { app.checkedAt = stamp }
             let decision = Self.evaluate(
                 rules: rules,
                 bundleIdentifier: app.bundleIdentifier,

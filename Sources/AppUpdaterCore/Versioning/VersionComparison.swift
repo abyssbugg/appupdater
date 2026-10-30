@@ -12,6 +12,8 @@
 // - Unrecognized qualifier words without digits (e.g. "plain", "x") collapse
 //   into the release rank, semver-build-metadata style: informative, not
 //   order-significant ("1.0plain" == "1.0").
+// - Semver build metadata ("+8", "+sha.abc") is stripped before parsing:
+//   "1.1.10+8" == "1.1.10" (semver §10 — metadata has no precedence).
 // - Strings we cannot honestly map ("v1"-shaped chunks mid-version, symbols,
 //   no digits at all) fall back to deterministic lexicographic comparison of
 //   the trimmed strings; it orders, it just isn't a version ordering.
@@ -125,6 +127,15 @@ public struct AppVersion: Sendable, Hashable, CustomStringConvertible {
         if let first = body.first, first == "v" || first == "V",
            let second = body.dropFirst().first, Component.isASCIIDigit(second) {
             body.removeFirst()
+        }
+
+        // Semver build metadata ("1.1.10+8") never affects precedence — strip
+        // it before parsing. Without this the "+" made the WHOLE installed
+        // version unparseable, which isUpdateAvailable treats as "no installed
+        // version", so ANY claim looked newer (Bionic 1.1.10+8 → cask
+        // "1.1.10,8" false positive, found live 2026-10-30).
+        if let plus = body.firstIndex(of: "+"), body[..<plus].contains(where: Component.isASCIIDigit) {
+            body = String(body[..<plus])
         }
 
         guard body.contains(where: Component.isASCIIDigit) else {

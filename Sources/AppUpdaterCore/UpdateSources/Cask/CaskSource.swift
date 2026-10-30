@@ -150,13 +150,16 @@ public struct CaskSource: UpdateSource, Sendable {
             return .noResult // artifact mismatch: the cask is for a different app
         }
 
+        let (marketingVersion, buildSuffix) = CaskVersion.split(version) // compare marketing only
+
         return .info(UpdateInfo(
             source: .cask,
-            newestShortVersion: version,
+            newestShortVersion: marketingVersion,
             // Cask JSON carries `bundle_version` (cask-computed CFBundleVersion), but
             // this phase pins newestBundleVersion = nil per the frozen brief; revisit
             // at install time if the oracle needs a bundle-version comparison.
             newestBundleVersion: nil,
+            newestBuild: buildSuffix,
             downloadURL: Self.downloadURL(from: record.url),
             sha256Hex: record.sha256?.hex?.trimmingCharacters(in: .whitespacesAndNewlines),
             // `depends_on.macos` is an operator map, not a plain floor version;

@@ -22,7 +22,7 @@ struct AppUpdaterApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra(appState.menuBarTitle, systemImage: "arrow.triangle.2.circlepath") {
+        MenuBarExtra {
             MenuBarView(showMainWindow: {
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)
@@ -30,15 +30,26 @@ struct AppUpdaterApp: App {
                 selfUpdate.checkForUpdates()
             })
             .environmentObject(appState)
-            .buttonStyle(.borderless)
+        } label: {
+            // Updatest: glyph + honest pending count (rules-aware; nothing
+            // when zero).
+            let pending = appState.menuData.counts.pending
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .accessibilityLabel(pending > 0 ? "AppUpdater, \(pending) updates" : "AppUpdater")
+            if pending > 0 { Text("\(pending)") }
         }
+        .menuBarExtraStyle(.menu)
 
         Window("AppUpdater", id: "main") {
             MainWindowView()
                 .environmentObject(appState)
                 .environmentObject(glue)
-                .frame(minWidth: 640, minHeight: 380)
         }
-        .defaultSize(width: 820, height: 520)
+        // ONE minimum, owned by MainWindowView (940×560). The old scene-level
+        // 640pt min + 820pt default let the window shrink below the content
+        // minimum, so SwiftUI centered the wider content and clipped both
+        // edges (live-capture finding 2026-10-30).
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1200, height: 720)
     }
 }

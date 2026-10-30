@@ -293,8 +293,11 @@ struct CliMain {
             var apps = try await scanner.scan(directoryURLs: dirs)
             if !nameFilters.isEmpty {
                 apps = apps.filter { app in
-                    let stack = [app.name.lowercased(), app.bundleIdentifier.lowercased()]
-                    return nameFilters.contains { needle in stack.contains { $0.contains(needle) } }
+                    // Display name, bundle id, AND the bundle's file name ("Brave Browser.app"
+                    // whose display name is "Brave"); needle-in-field substring only.
+                    let fileName = URL(fileURLWithPath: app.path).deletingPathExtension().lastPathComponent
+                    let stack = [app.name, app.bundleIdentifier, fileName].map { $0.lowercased() }
+                    return nameFilters.contains { needle in stack.contains { $0.contains(needle.lowercased()) } }
                 }
             }
             apps.sort { ($0.name, $0.path) < ($1.name, $1.path) }

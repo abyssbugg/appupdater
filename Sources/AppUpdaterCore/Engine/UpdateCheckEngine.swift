@@ -34,6 +34,8 @@ public struct UpdateCheckEngine: Sendable {
     /// claim annotated with its derivation provenance. Declared feeds always win —
     /// derivation never doubles up a declared check.
     public let feedDerivation: FeedDerivationResolver?
+    /// Clock seam for `InstalledApp.checkedAt` stamps (tests pin it).
+    let now: @Sendable () -> Date
 
     /// Upper bound on derived feeds attempted per app (bounds network fan-out).
     static let maxDerivedFeedAttempts = 3
@@ -43,7 +45,8 @@ public struct UpdateCheckEngine: Sendable {
     public init(
         sources: [any UpdateSource],
         manualSource: ManualSourceResolver? = nil,
-        feedDerivation: FeedDerivationResolver? = nil
+        feedDerivation: FeedDerivationResolver? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         let precedence = VersionOracle.sourcePrecedence
         let rank: (SourceKind) -> Int = { kind in
@@ -52,6 +55,7 @@ public struct UpdateCheckEngine: Sendable {
         self.sortedSources = sources.sorted { rank($0.kindValue) < rank($1.kindValue) }
         self.manualSource = manualSource
         self.feedDerivation = feedDerivation
+        self.now = now
     }
 
     /// Run one source for one app, appending its claim (or verbatim failure).
@@ -116,8 +120,13 @@ public struct UpdateCheckEngine: Sendable {
             candidates: candidates,
             installedShortVersion: app.shortVersion
         )
+        // Stamp WHEN this app was checked: `InstalledApp.checkedAt` existed but
+        // was never set, so "Recently Checked" sorting and the detail pane's
+        // "checked … ago" had nothing to show (live finding 2026-10-30).
+        var checkedApp = app
+        checkedApp.checkedAt = now()
         return UpdateCheck(
-            app: app,
+            app: checkedApp,
             candidates: candidates,
             failures: failures,
             resolved: resolved
