@@ -49,8 +49,9 @@ struct ScheduleSettingsView: View {
                             .textSelection(.enabled)
                     }
                     Text("When exactly one app newly pends, its notification carries actions: "
-                        + "Open AppUpdater and Stage Install Command (copies the CLI command to "
-                        + "the clipboard — nothing runs). Other fires stay quiet summaries.")
+                        + "Open AppUpdater and Install Update (runs the verified install "
+                        + "chain in-app; a .pkg update stages a command you run instead). "
+                        + "Other fires stay quiet summaries.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
