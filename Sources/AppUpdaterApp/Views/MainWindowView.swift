@@ -511,6 +511,7 @@ private struct LocationSettingsHost: View {
 
 struct AppRowView: View {
     let row: AppRow
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
         HStack(spacing: 11) {
@@ -545,6 +546,20 @@ struct AppRowView: View {
 
             versionBlock
             StatusPill(verdict: row.check?.verdict)
+            if row.updateAvailable && !row.app.isMacAppStore {
+                Button {
+                    appState.requestInstall(bundleID: row.app.bundleIdentifier)
+                    appState.showDetails(bundleID: row.app.bundleIdentifier)
+                } label: {
+                    Label("Install…", systemImage: "arrow.down.circle")
+                        .font(.caption.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .tint(.orange)
+                .help("Stage the verified install command — copied to the clipboard, nothing runs until you run it; the detail pane shows it")
+            }
         }
         .padding(.vertical, 3)
     }
@@ -720,7 +735,7 @@ private struct DetailInspector: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
                 if let command = appState.lastInstallCommand,
-                   command.contains("--apps \(row.app.name)") {
+                   appState.lastInstallBundleID == row.app.bundleIdentifier {
                     Text(command)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
@@ -734,7 +749,7 @@ private struct DetailInspector: View {
                         Spacer(minLength: 8)
                         Button("Type in Terminal…") {
                             if let command = appState.lastInstallCommand,
-                               command.contains("--apps \(row.app.name)") {
+                               appState.lastInstallBundleID == row.app.bundleIdentifier {
                                 appState.typeStagedCommandInTerminal(command)
                             }
                         }

@@ -74,10 +74,14 @@ final class AppState: ObservableObject {
     /// Set only by the scan-root builder; cleared again on a healthy read.
     @Published private(set) var scanLocationsError: String?
 
-    /// The exact owner-run command staged by the last Install Now press
+    /// The exact owner-run command staged by the last Install press
     /// (nil until then). Shown verbatim in the window — the app itself
     /// never runs it.
     @Published private(set) var lastInstallCommand: String?
+
+    /// The bundle the staged command belongs to (replaces string-matching the
+    /// command text, which broke for app names containing spaces).
+    @Published private(set) var lastInstallBundleID: String?
 
     /// Master switch for the LOCAL summary notification (settings pane
     /// toggle; default ON). The distributed fire event is NOT gated on this
@@ -899,9 +903,26 @@ final class AppState: ObservableObject {
         let needsQuotes = name.contains(" ") || name.contains("\"")
         let escaped = name.replacingOccurrences(of: "\"", with: "\\\"")
         let shellSafe = needsQuotes ? "\"\(escaped)\"" : escaped
-        let command =
+        var command =
             "swift run appupdater-cli install --apps \(shellSafe) --apply"
+        // Make the staged command runnable from ANY directory: a dev bundle
+        // lives at <repo>/build/AppUpdater.app — prefix the cd when that repo
+        // layout is real. Released bundles stage the bare command (the repo
+        // checkout is where the CLI exists; the UI copy says so).
+        let bundleURL = Bundle.main.bundleURL
+        let repoRoot = bundleURL
+            .deletingLastPathComponent()   // build/
+            .deletingLastPathComponent()   // <repo>
+        // A dev bundle sits at <repo>/build/AppUpdater.app; a real Package.swift
+        // at the computed root is the trustworthy signal of that layout.
+        if FileManager.default.fileExists(
+            atPath: repoRoot.appendingPathComponent("Package.swift").path) {
+            let path = repoRoot.path
+            let quotedPath = path.contains(" ") ? "\"\(path)\"" : path
+            command = "cd \(quotedPath) && " + command
+        }
         lastInstallCommand = command
+        lastInstallBundleID = bundleID
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(command, forType: .string)
