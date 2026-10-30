@@ -11,6 +11,7 @@ enum VerdictStyle {
         case "update": return .orange
         case "current": return .green
         case "failed": return .red
+        case "ignored": return .gray
         default: return .gray
         }
     }
@@ -20,6 +21,7 @@ enum VerdictStyle {
         case "update": return "arrow.up.circle.fill"
         case "current": return "checkmark.circle.fill"
         case "failed": return "exclamationmark.triangle.fill"
+        case "ignored": return "eye.slash.circle"
         default: return "questionmark.circle"
         }
     }
@@ -29,6 +31,7 @@ enum VerdictStyle {
         case "update": return "Update"
         case "current": return "Current"
         case "failed": return "Failed"
+        case "ignored": return "Ignored"
         case "unknown": return "Unknown"
         case nil: return "Not checked"
         default: return verdict ?? "?"
@@ -138,6 +141,10 @@ struct MainWindowView: View {
             ProxySettingsSheet(onClose: { showProxySheet = false })
         }
         .onChange(of: list.lastError) { _, _ in errorDismissed = false }
+        // LIVED-TEST FIX: a dismissed banner must not suppress FUTURE
+        // refusals — actionError changes reset the dismissal too, so an
+        // install refusal is always visible when it happens.
+        .onChange(of: appState.actionError) { _, _ in errorDismissed = false }
         .onAppear {
             // Product-default: updates lead the list (MacUpdater behavior).
             // The user's own sort choice wins the moment they change it.
@@ -545,7 +552,12 @@ struct AppRowView: View {
             Spacer(minLength: 8)
 
             versionBlock
-            StatusPill(verdict: row.check?.verdict)
+            // HONEST PILL (live-test finding): a row whose rules decision
+            // ignores it must not show "Update" with no button — the pill and
+            // the affordance have to tell the same story.
+            StatusPill(
+                verdict: row.check?.verdict == "update" && !row.updateAvailable
+                    ? "ignored" : row.check?.verdict)
             if row.updateAvailable && !row.app.isMacAppStore {
                 Button {
                     appState.showDetails(bundleID: row.app.bundleIdentifier)
@@ -560,12 +572,29 @@ struct AppRowView: View {
                 .tint(.orange)
                 .disabled(appState.installInFlightBundleID != nil)
                 .help(
-                    "Installs the update: user-space updates run the verified chain in-app "
-                        + "(download → HTTPS + SHA-256 → backup → swap); .pkg updates stage a command you run")
+                    appState.installInFlightBundleID != nil
+                        ? "Another install is running — installs run one at a time"
+                        : "Installs the update: user-space updates run the verified chain in-app "
+                            + "(download → HTTPS + SHA-256 → backup → swap); .pkg updates stage a command you run")
                 if appState.installInFlightBundleID == row.app.bundleIdentifier {
                     ProgressView()
                         .controlSize(.small)
                 }
+            } else if row.updateAvailable && row.app.isMacAppStore {
+                // Store honesty (MenuData parity): the truthful affordance
+                // points at the Store instead of vanishing — the pill says
+                // "Update", so something clickable must explain why Install
+                // is not offered.
+                Button {
+                    appState.showDetails(bundleID: row.app.bundleIdentifier)
+                } label: {
+                    Label("App Store", systemImage: "bag.fill")
+                        .font(.caption.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .help("Updates through the Mac App Store — it cannot be user-space installed; the detail pane explains")
             }
         }
         .padding(.vertical, 3)
@@ -798,6 +827,14 @@ private struct DetailInspector: View {
                         .font(.caption)
                         .help("Opt-in: types the same command into your default terminal (you attend any password prompt)")
                     }
+                } else if appState.lastInstallErrorBundleID == row.app.bundleIdentifier,
+                          let refusal = appState.lastInstallError {
+                    // LIVED-TEST FIX: the refusal renders HERE — in the pane
+                    // the click itself opens — not only on the list column's
+                    // banner the user can no longer see.
+                    Label(refusal, systemImage: "xmark.octagon.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
                 } else {
                     Text(
                         "Installs user-space updates in-place with the verified chain (download → HTTPS + SHA-256 → "

@@ -33,13 +33,14 @@ import AppUpdaterCore
 ///   faked as success. Ask-per-fire (with `deliverImmediately: false`) keeps
 ///   the flow boring; macOS itself caches the user's standing answer.
 ///   Actionable extension (tier-2 gap, 2026-10-28): when the diff is
-///   EXACTLY ONE stageable app, the notification carries the
+///   EXACTLY ONE updateable app, the notification carries the
 ///   `NotificationActionIDs.categoryPendingUpdate` category ("Open
-///   AppUpdater" / "Stage Install Command") and its actions route through
-///   the SAME consent boundary — Open brings the main window forward, Stage
-///   stages the owner-run CLI command via ``requestInstall``. NOTHING is
-///   ever executed or auto-applied; fires without actionable content keep
-///   the existing passive summary byte-for-byte.
+///   AppUpdater" / "Install Update") and its actions route through
+///   the SAME consent boundary — Open brings the main window forward,
+///   Install runs the clicked-install chain via ``requestInstall`` (since
+///   the 2026-10-29 clicked-install fix this REALLY installs user-space
+///   updates; .pkg stages the owner command). Fires without actionable
+///   content keep the existing passive summary byte-for-byte.
 /// - Schedule.json persistence is real (ScheduleFileStore): every engine
 ///   snapshot lands on disk; the UI's schedule lines always reflect the
 ///   last snapshot the engine emitted.
@@ -94,6 +95,15 @@ final class AppState: ObservableObject {
     /// Serialization guard: one install at a time; buttons disable and show
     /// progress off this.
     @Published private(set) var installInFlightBundleID: String?
+
+    /// The last clicked-install REFUSAL (pre-planning or planner rejection),
+    /// scoped to its row. LIVED-TEST FIX 2026-10-29: refusals previously
+    /// surfaced ONLY via ``actionError`` on the list column's banner — which
+    /// the click's own `showDetails` navigates AWAY from, so a refused
+    /// install looked like a dead button. The detail card now renders this
+    /// inline, exactly where the user is looking.
+    @Published private(set) var lastInstallError: String?
+    @Published private(set) var lastInstallErrorBundleID: String?
 
     /// Master switch for the LOCAL summary notification (settings pane
     /// toggle; default ON). The distributed fire event is NOT gated on this
@@ -713,7 +723,7 @@ final class AppState: ObservableObject {
                         options: [.foreground]),
                     UNNotificationAction(
                         identifier: NotificationActionIDs.actionStageInstall,
-                        title: "Stage Install Command",
+                        title: "Install Update",
                         options: []),
                 ],
                 intentIdentifiers: [],
@@ -745,7 +755,7 @@ final class AppState: ObservableObject {
                 Task { await requestInstall(bundleID: bundleID) }
             } else {
                 actionError =
-                    "Stage Install for \(appName): it is no longer in the current list — run a check and stage it from the window."
+                    "Install for \(appName): it is no longer in the current list — run a check and install it from the window."
             }
         case .ignored:
             break
@@ -917,6 +927,10 @@ final class AppState: ObservableObject {
         }
         installInFlightBundleID = bundleID
         defer { installInFlightBundleID = nil }
+        // A fresh attempt clears the previous refusal for this row — the card
+        // shows the CURRENT truth, never a stale complaint.
+        lastInstallError = nil
+        lastInstallErrorBundleID = nil
         do {
             let outcome = try await performClickedInstall(row: row)
             lastInstallOutcome = outcome
@@ -934,11 +948,18 @@ final class AppState: ObservableObject {
                 lastInstallBundleID = nil
             }
             if let aborted = outcome.abortedStep {
-                actionError =
+                let message =
                     "Install for \(row.app.name) aborted at \(aborted.rawValue) — the receipt shows how far it got; nothing was left half-done silently."
+                lastInstallError = message
+                lastInstallErrorBundleID = bundleID
+                actionError = message
             }
         } catch {
-            actionError = "Install for \(row.app.name) refused: \(error.localizedDescription)"
+            // Surface the refusal where the user IS (the detail card), not
+            // only on the list column's banner — see lastInstallError's doc.
+            lastInstallError = "Install for \(row.app.name) refused: \(error.localizedDescription)"
+            lastInstallErrorBundleID = bundleID
+            actionError = lastInstallError
         }
     }
 

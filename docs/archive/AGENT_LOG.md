@@ -5,6 +5,49 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
+## 2026-10-29 — LIVE-TEST FINDINGS FIXED: invisible install refusals + Warp-class URLs + stale "Stage" labels + lying pill
+
+**Owner report (live-testing the new build):** "apps that had new update does have the
+update button but install button something is wrong." Reproduced by code-read + CLI dry
+plan (the app itself never wrote staging/backups — every click was refused before the
+coordinator, and the refusal was rendered NOWHERE the user could see). Four confirmed
+defects, all fixed:
+
+1. **Refusals were invisible.** `errorBanner` is an overlay on `listColumn` ONLY; the
+   row Install click calls `showDetails`, navigating to the detail pane — which had no
+   error surface at all (planner refusals also never populate `lastInstallOutcome`, so
+   the card kept its neutral text). Plus `errorDismissed` reset only on
+   `list.lastError` changes, never on `actionError` — one dismissed banner suppressed
+   every future refusal. FIX: scoped `lastInstallError`/`lastInstallErrorBundleID`
+   published; the installCard renders the refusal inline (red, in the pane the click
+   opens); `onChange(of: actionError)` also resets the dismissal.
+2. **Warp-class URLs refused with a cryptic reason.** Warp's cask claim is
+   `https://app.warp.dev/download/brew?version=…&package=dmg` — `pathExtension` is
+   EMPTY → "extension '.' is not installable" (an installable dmg!). FIX (engine,
+   InstallPlanner.kind): when the path has NO extension, query values are consulted
+   for a dmg/zip/pkg hint, including values that carry the artifact name
+   (`file=Foo.dmg`); a non-empty unusable extension never falls back; a wrong hint
+   still fails the security floor (HTTPS + sha256 + artifact magic) on the bytes.
+   Honest refusal message rewritten for the extensionless case. +4 planner tests
+   (843 total / 71 suites).
+3. **Stale "Stage" labels now lied in the other direction.** Since the clicked-install
+   fix the menu + notification actions REALLY install — but still said
+   "Stage Install: X" / "Stage Install Command". Labels now honest: "Install X" /
+   "Install Update"; MenuDataTests expectations updated (+2 notification doc comments).
+4. **The pill lied on rows with no Install button.** `StatusPill` rendered "Update"
+   unconditionally while the button required `updateAvailable && !isMacAppStore` —
+   ignored and Store rows showed "Update" with no affordance. FIX: ignored rows show
+   an "Ignored" pill (new VerdictStyle case); Store rows get a small "App Store"
+   pointer button opening the detail card's explanation (MenuData parity); disabled
+   in-flight buttons explain "Another install is running" in their tooltip.
+
+Verified engines-side: CLI dry plan for Warp now yields `kind: dmg`. Gate: **843 tests /
+71 suites, swiftlint 0**. Files: InstallPlanner.swift (+tests), AppState(+Install none —
+state fields in AppState.swift), MainWindowView.swift, MenuBarView none, MenuData.swift
+(label string only), notification action title.
+
+---
+
 ## 2026-10-29 — OWNER-REPORTED BUG FIXED: clicked installs never installed anything (now they do)
 
 **Confirmed (owner report + code read):** "I can't update any of the apps that say an

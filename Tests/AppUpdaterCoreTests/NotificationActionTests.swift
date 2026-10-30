@@ -113,7 +113,7 @@ struct NotificationActionPlannerTests {
     }
 
     /// More than one newly pending name stays on the PASSIVE summary — a
-    /// "Stage Install Command" button would have to guess which app.
+    /// "Install Update" button would have to guess which app.
     @Test
     func twoNewlyPendingNamesStayPassive() {
         let plan = NotificationActionPlanner.plan(
@@ -254,7 +254,7 @@ struct NotificationActionRouterTests {
         #expect(outcome == .openMainWindow)
     }
 
-    /// "Stage Install Command" routes the NAMED app's bundle ID through the
+    /// "Install Update" routes the NAMED app's bundle ID through the
     /// consent boundary — the outcome carries both strings verbatim.
     @Test
     func stageActionRoutesBundleAndName() {

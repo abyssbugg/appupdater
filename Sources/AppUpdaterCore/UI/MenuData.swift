@@ -169,7 +169,7 @@ public struct MenuData: Sendable, Equatable {
             ]
         }
         return [
-            MenuAction(id: .installNow(bundleID: bundleID), label: "Stage Install: \(row.app.name)"),
+            MenuAction(id: .installNow(bundleID: bundleID), label: "Install \(row.app.name)"),
             MenuAction(id: .viewDetails(bundleID: bundleID), label: "View Details: \(row.app.name)"),
         ]
     }

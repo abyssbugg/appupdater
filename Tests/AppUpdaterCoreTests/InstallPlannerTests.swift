@@ -41,6 +41,37 @@ import Testing
         #expect(plan.kind == .zip)
     }
 
+    // QUERY-STRING ARTIFACTS (live-test finding, 2026-10-29): distributors
+    // like Warp put the kind in the query (`…/download/brew?…&package=dmg`)
+    // with an extensionless path — the plan must still be a dmg, and a
+    // queryless extensionless URL must still refuse with an honest reason.
+    @Test func queryStringKindHintPlansWhenPathHasNoExtension() throws {
+        let plan = try planner.plan(
+            app: app(),
+            update: update(url: "https://app.warp.dev/download/brew?version=v1&package=dmg"))
+        #expect(plan.kind == .dmg)
+    }
+
+    @Test func queryStringZipAndPkgHintsAlsoHonored() throws {
+        #expect(InstallPlanner.kind(from: URL(string: "https://example.com/get?type=zip")!) == .zip)
+        #expect(InstallPlanner.kind(from: URL(string: "https://example.com/get?file=x.pkg")!) == .pkg)
+    }
+
+    @Test func extensionlessURLWithoutQueryHintStillRefusedHonestly() {
+        #expect(throws: InstallerError.self) {
+            try planner.plan(
+                app: app(),
+                update: update(url: "https://example.com/download/latest?token=abc&os=mac"))
+        }
+        #expect(InstallPlanner.kind(from: URL(string: "https://example.com/download/latest?token=abc")!) == nil)
+    }
+
+    @Test func nonEmptyPathExtensionNeverFallsBackToQuery() {
+        // a path extension the planner cannot use must refuse on its own
+        // merits — the query fallback is only for EMPTY extensions.
+        #expect(InstallPlanner.kind(from: URL(string: "https://example.com/victim.tbz?type=zip")!) == nil)
+    }
+
     @Test func missingDownloadURLRefused() {
         #expect(throws: InstallerError.self) {
             try planner.plan(app: app(), update: UpdateInfo(source: .cask, newestShortVersion: "2.0", downloadURL: nil, sha256Hex: "aa"))

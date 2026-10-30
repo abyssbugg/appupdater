@@ -16,13 +16,42 @@ public struct InstallPlanner: Sendable {
     /// The kind a plan assumes, derived from the download URL's path extension.
     /// Returns nil when the extension is not dmg/zip/pkg — planner shows the
     /// honest reason instead of guessing (tbz/tgz/bin stay refused outright).
+    ///
+    /// QUERY-STRING ARTIFACTS (2026-10-29, live-test finding): some
+    /// distributors put the artifact kind in the query, not the path — e.g.
+    /// Warp ships `https://app.warp.dev/download/brew?version=…&package=dmg`,
+    /// whose `pathExtension` is EMPTY, which refused an installable dmg with
+    /// the cryptic "extension '.'". When the path has NO extension at all, the
+    /// query values are consulted for a dmg/zip/pkg hint. This only ever
+    /// RELAXES the empty-extension case — a wrong hint still fails the
+    /// security floor (HTTPS + sha256 + artifact magic) on the actual bytes,
+    /// so it cannot sneak a mis-kinded artifact through.
     public static func kind(from url: URL) -> InstallKind? {
         switch url.pathExtension.lowercased() {
         case "dmg": return .dmg
         case "zip": return .zip
         case "pkg": return .pkg
-        default: return nil
+        default: break
         }
+        guard url.pathExtension.isEmpty,
+              let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        for item in comps.queryItems ?? [] {
+            guard let raw = item.value, !raw.isEmpty else { continue }
+            // The value may name the artifact itself (`file=Foo.dmg`) — its
+            // own pathExtension is then consulted exactly like the URL's.
+            let candidates = [raw.lowercased(), URL(fileURLWithPath: raw).pathExtension.lowercased()]
+            for candidate in candidates {
+                switch candidate {
+                case "dmg": return .dmg
+                case "zip": return .zip
+                case "pkg": return .pkg
+                default: break
+                }
+            }
+        }
+        return nil
     }
 
     public func plan(app: InstalledApp, update: UpdateInfo) throws -> InstallPlan {
@@ -33,8 +62,11 @@ public struct InstallPlanner: Sendable {
             throw InstallerError.httpsRequired(url: url.absoluteString)
         }
         guard let kind = Self.kind(from: url) else {
+            let cause = url.pathExtension.isEmpty
+                ? "the URL path has no file extension and its query carries no dmg/zip/pkg hint"
+                : "extension '.\(url.pathExtension)'"
             throw InstallerError.unsupportedArtifact(
-                reason: "extension '.\(url.pathExtension)' is not installable user-space in v1 (supported: dmg, zip; pkg needs the privileged lane)"
+                reason: "\(cause) — not installable user-space in v1 (supported: dmg, zip; pkg needs the privileged lane)"
             )
         }
 

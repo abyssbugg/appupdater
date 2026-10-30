@@ -125,7 +125,7 @@ struct MenuDataTests {
             .viewDetails(bundleID: "com.example.zeta"),
         ])
         #expect(data.pendingSection.actions[0].label == "View Details: Aqua Store — update available in the Mac App Store")
-        #expect(data.pendingSection.actions[1].label == "Stage Install: Zeta Edit")
+        #expect(data.pendingSection.actions[1].label == "Install Zeta Edit")
         #expect(data.pendingSection.actions[2].label == "View Details: Zeta Edit")
     }
 
@@ -316,7 +316,7 @@ struct MenuDataTests {
             .viewDetails(bundleID: "com.example.sierra"),
         ])
         #expect(MenuData.actions(for: upsell).map(\.label) == [
-            "Stage Install: Sierra Edit",
+            "Install Sierra Edit",
             "View Details: Sierra Edit",
         ])
 
