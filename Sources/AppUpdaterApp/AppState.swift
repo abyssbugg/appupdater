@@ -422,7 +422,10 @@ final class AppState: ObservableObject {
     /// autoCheck decisions (fresh reads — rule edits apply to the next fire
     /// with no restart, mirroring the engine's seam contract).
     func autoCheckBundleIDs() -> [String] {
-        list.rows.filter { $0.decision.autoCheck }.map { $0.app.bundleIdentifier }
+        // R2: At app launch, list.rows is empty. When this fires before manual
+        // refresh, return [] to trigger inventory-only fire in scheduledFire.
+        if list.rows.isEmpty { return [] }
+        return list.rows.filter { $0.decision.autoCheck }.map { $0.app.bundleIdentifier }
     }
 
     /// The engine's fire seam.
@@ -474,7 +477,9 @@ final class AppState: ObservableObject {
         lastChecks = []
         let evaluated = await rules.evaluate(apps: apps, checks: [])
         await list.setRows(evaluated)
-        await recordScheduledFireOutcome(appsChecked: apps.count, evaluatedRows: evaluated)
+        // R3: When ids is nil (inventory-only fire), no sources are consulted.
+        // Record appsChecked as 0 (honest), not apps.count (false "checked").
+        await recordScheduledFireOutcome(appsChecked: 0, evaluatedRows: evaluated)
         return apps.count
     }
 
@@ -572,9 +577,26 @@ final class AppState: ObservableObject {
     func refreshInventoryOnly() async {
         do {
             let apps = try await ProductionAppScanner().scan(directoryURLs: effectiveScanDirectories())
+            // R1: Carry over previous checks for unchanged apps (same bundleIdentifier,
+            // path, and versions). Vanished or self-updated apps lose their checks.
+            let carriedChecks = CheckCarryOver.carry(
+                previousChecks: lastChecks,
+                previousApps: lastApps,
+                newApps: apps
+            )
+            // Compact carries into a parallel array of definite checks, filling nil
+            // entries (new/changed apps) with "unknown" verdict placeholders.
+            var checksForEvaluation: [UpdateCheck] = []
+            for (index, carried) in carriedChecks.enumerated() {
+                if let check = carried {
+                    checksForEvaluation.append(check)
+                } else {
+                    checksForEvaluation.append(UpdateCheck(app: apps[index], candidates: [], resolved: nil))
+                }
+            }
             lastApps = apps
-            lastChecks = []
-            let evaluated = await rules.evaluate(apps: apps, checks: [])
+            lastChecks = checksForEvaluation
+            let evaluated = await rules.evaluate(apps: apps, checks: checksForEvaluation)
             await list.setRows(evaluated)
         } catch {
             actionError = "rescan after a folder change failed — \(error)"
@@ -970,5 +992,3 @@ final class AppState: ObservableObject {
         }
     }
 }
-
-// (NotificationResponseDelegate moved to its own file for the file_length gate; wiring above unchanged.)
