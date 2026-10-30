@@ -65,6 +65,7 @@ extension AppState {
                     let installOutcome = try await InstallCoordinator().run(
                         plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot,
                         relaunchRequested: false)
+                    recordVerifiedInstall(installOutcome)
                     outcomes.append(AutoApplyOutcome(
                         app: row.app, decidedAt: decidedAt, decision: .apply,
                         installOutcome: installOutcome))

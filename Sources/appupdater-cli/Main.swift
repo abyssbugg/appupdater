@@ -352,6 +352,7 @@ struct CliMain {
                 sources: sources,
                 manualSource: manualService.engineResolver(
                     session: cliSession, githubCacheDirectory: appSupport),
+                verifiedInstalls: VerifiedInstallLedger(directory: appSupport),
                 feedDerivation: FeedDerivationResolver { app in
                     SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
                 })
@@ -414,6 +415,17 @@ struct CliMain {
                 let outcome = await coordinator.run(
                     plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot,
                     relaunchRequested: relaunchRequested)
+                // Shortfall case only (vendor bundle under-declares its version):
+                // remember the verified install so later checks stop re-offering
+                // the same claim while the bundle is unchanged.
+                do {
+                    if let record = try VerifiedInstallLedger(directory: appSupport).recordIfShortfall(outcome) {
+                        errLine("note: \(record.claimedShortVersion) installed but the bundle declares "
+                            + "\(record.installedShortVersion); recorded as a verified install")
+                    }
+                } catch {
+                    errLine("note: recording the verified install failed — \(error)")
+                }
 
                 // Candidate-filter receipts (glue-wiring, candidates lane):
                 // the deep filter over the FINAL artifact of a completed

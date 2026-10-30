@@ -34,6 +34,10 @@ public struct UpdateCheckEngine: Sendable {
     /// claim annotated with its derivation provenance. Declared feeds always win —
     /// derivation never doubles up a declared check.
     public let feedDerivation: FeedDerivationResolver?
+    /// Verified-install seam (nil = off): a resolved claim that a recorded
+    /// verified apply already delivered (vendor artifact under-declares its
+    /// version) reads "current" with a note. See VerifiedInstallLedger.
+    public let verifiedInstalls: VerifiedInstallLedger?
     /// Clock seam for `InstalledApp.checkedAt` stamps (tests pin it).
     let now: @Sendable () -> Date
 
@@ -45,6 +49,7 @@ public struct UpdateCheckEngine: Sendable {
     public init(
         sources: [any UpdateSource],
         manualSource: ManualSourceResolver? = nil,
+        verifiedInstalls: VerifiedInstallLedger? = nil,
         feedDerivation: FeedDerivationResolver? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -55,6 +60,7 @@ public struct UpdateCheckEngine: Sendable {
         self.sortedSources = sources.sorted { rank($0.kindValue) < rank($1.kindValue) }
         self.manualSource = manualSource
         self.feedDerivation = feedDerivation
+        self.verifiedInstalls = verifiedInstalls
         self.now = now
     }
 
@@ -116,21 +122,31 @@ public struct UpdateCheckEngine: Sendable {
             }
         }
 
-        let resolved = VersionOracle().resolve(
+        var resolved = VersionOracle().resolve(
             candidates: candidates,
             installedShortVersion: app.shortVersion
         )
+        var verifiedNote: String?
+        if let claim = resolved, let ledger = verifiedInstalls,
+           let record = ledger.matchingRecord(for: app, claimedVersion: claim.newestShortVersion) {
+            resolved = nil
+            verifiedNote = "\(claim.newestShortVersion) was installed and verified on "
+                + "\(record.recordedAt.formatted(.iso8601)); the vendor's bundle declares "
+                + "\(record.installedShortVersion), so the claim is treated as current until the bundle changes"
+        }
         // Stamp WHEN this app was checked: `InstalledApp.checkedAt` existed but
         // was never set, so "Recently Checked" sorting and the detail pane's
         // "checked … ago" had nothing to show (live finding 2026-10-30).
         var checkedApp = app
         checkedApp.checkedAt = now()
-        return UpdateCheck(
+        var check = UpdateCheck(
             app: checkedApp,
             candidates: candidates,
             failures: failures,
             resolved: resolved
         )
+        check.verifiedInstallNote = verifiedNote
+        return check
     }
 
     /// Check many apps concurrently (TaskGroup), returning results in INPUT order so
@@ -222,6 +238,9 @@ public struct UpdateCheck: Codable, Hashable, Sendable {
     /// - "failed": every source either failed or produced nothing, so nothing is known
     /// - "unknown": sources succeeded but produced no claims for this app identity
     public var verdict: String
+    /// Set when a verified-install record turned a resolved claim into
+    /// "current" (VerifiedInstallLedger). nil otherwise; additive Codable.
+    public var verifiedInstallNote: String?
 
     public init(app: InstalledApp, candidates: [UpdateInfo], failures: [CheckSourceFailure] = [], resolved: UpdateInfo?) {
         self.app = app

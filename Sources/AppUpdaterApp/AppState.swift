@@ -467,6 +467,7 @@ final class AppState: ObservableObject {
             sources: await checkSources(),
             manualSource: manualSourceResolver.engineResolver(
                 session: proxySession.session, githubCacheDirectory: appSupportDirectory),
+            verifiedInstalls: VerifiedInstallLedger(directory: appSupportDirectory),
             feedDerivation: FeedDerivationResolver { app in
                 SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
             }
@@ -862,6 +863,7 @@ final class AppState: ObservableObject {
             sources: await checkSources(),
             manualSource: manualSourceResolver.engineResolver(
                 session: proxySession.session, githubCacheDirectory: appSupportDirectory),
+            verifiedInstalls: VerifiedInstallLedger(directory: appSupportDirectory),
             feedDerivation: FeedDerivationResolver { app in
                 SparkleFeedDerivation.candidateFeeds(appBundlePath: app.path)
             }

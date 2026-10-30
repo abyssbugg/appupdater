@@ -57,8 +57,10 @@ extension AppState {
         // NOTE: run() does NOT throw — it records aborts in outcome.abortedStep
         // (same as the CLI; the pre-existing Decision14 call carries a spurious
         // `try` that warns). Guard/planner failures above DO throw.
-        return await InstallCoordinator().run(
+        let outcome = await InstallCoordinator().run(
             plan, stagingRoot: stagingRoot, backupsRoot: backupsRoot,
             relaunchRequested: false)
+        recordVerifiedInstall(outcome)
+        return outcome
     }
 }

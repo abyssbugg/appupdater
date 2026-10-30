@@ -23,6 +23,16 @@ extension AppState {
         }
     }
 
+    /// After any apply (manual Update… or auto-apply): remember the
+    /// shortfall case so the same claim stops re-offering (VerifiedInstallLedger).
+    func recordVerifiedInstall(_ outcome: InstallOutcome) {
+        do {
+            try VerifiedInstallLedger(directory: appSupportDirectory).recordIfShortfall(outcome)
+        } catch {
+            Self.cacheLog.error("verified-installs.json save failed — \(String(describing: error), privacy: .public)")
+        }
+    }
+
     /// Launch restore: load the cache, re-scan, carry. A real check that
     /// completed meanwhile wins (its results are never overwritten).
     func restoreLastChecks() {

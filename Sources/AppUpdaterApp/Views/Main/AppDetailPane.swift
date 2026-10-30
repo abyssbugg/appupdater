@@ -118,7 +118,10 @@ private struct AppDetailContent: View {
 
     private var verdictSentence: String {
         switch row.check?.verdict {
-        case "current": return "Up to date."
+        case "current":
+            // A verified-install suppression is never silent (VerifiedInstallLedger).
+            if let note = row.check?.verifiedInstallNote { return "Up to date — \(note)." }
+            return "Up to date."
         case "failed": return "The sources could not answer — nothing is guessed. Check again later."
         case "unknown": return "No source could verify a newer version for this app."
         case nil: return "Not checked yet."
