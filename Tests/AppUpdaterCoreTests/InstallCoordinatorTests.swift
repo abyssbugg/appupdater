@@ -477,6 +477,28 @@ extension InstallCoordinatorTests {
         #expect((try? FileManager.default.contentsOfDirectory(atPath: stagingRoot.path))?.isEmpty ?? true)
     }
 
+    /// cmux shape (live 2026-10-30): the release claims 2.0.1 but its bundle
+    /// still declares 2.0. The swap is real and green; the post-scan receipt
+    /// must SAY the installed version fell short of the claim.
+    @Test func vendorArtifactBelowClaimIsReportedNotHidden() async throws {
+        try makeVictim()
+        let next = try ApplyFixture.makeApp(
+            in: root.appendingPathComponent("artifact-src", isDirectory: true),
+            name: "Victim", bundleID: victimBundleID, shortVersion: "2.0", bundleVersion: "20")
+        let zipURL = root.appendingPathComponent("victim-2.0.1.zip")
+        try ApplyFixture.makeZip(of: next, at: zipURL)
+        try serve(zipURL)
+        let seams = Seams(openerCalls: LockedBox<[URL]>([]), disposed: LockedBox<[URL]>([]))
+        let outcome = await coordinator(seams).run(
+            try planOf(artifact: zipURL, claim: "2.0.1"),
+            stagingRoot: stagingRoot, backupsRoot: backupsRoot, relaunchRequested: false)
+        #expect(outcome.abortedStep == nil)
+        #expect(outcome.finalInstalledShortVersion == "2.0")
+        let postScan = try #require(outcome.receipts.first { $0.step == .postScan })
+        #expect(postScan.succeeded)
+        #expect(postScan.detail.contains("still reports 2.0, below the claimed 2.0.1"))
+    }
+
     /// Wrong source sha256 → the downloader refuses; abort lands on
     /// `.download`, the victim is untouched, no backup is made, nothing
     /// lingered in staging.

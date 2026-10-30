@@ -379,7 +379,8 @@ public struct InstallCoordinator: Sendable {
         finalInstalledVersion = InfoProbe.string(for: ["CFBundleShortVersionString"], in: installedInfo)
         receipt(.postScan, startedAt: postScanStarted, succeeded: true,
                 detail: "post-scan: \(plan.app.path) serves bundle id \(scannedID ?? "<absent>"), "
-                    + "CFBundleShortVersionString = \(finalInstalledVersion ?? "<absent>")")
+                    + "CFBundleShortVersionString = \(finalInstalledVersion ?? "<absent>")"
+                    + Self.versionShortfallNote(installed: finalInstalledVersion, claimed: plan.update.newestShortVersion))
 
         // MARK: Backup retention (BACKUP RETENTION v1) — the ONLY pruner call
         // site in the file. Reaching here means the chain is fully green
@@ -405,6 +406,20 @@ public struct InstallCoordinator: Sendable {
         }
 
         return done()
+    }
+
+    /// Live 2026-10-30 (cmux 0.65.2 → claimed 0.65.2.2): the vendor's release
+    /// artifact still declared the OLD CFBundleShortVersionString, so a verified
+    /// swap of NEW bytes reads back as the old version and later checks will
+    /// offer the same claim again. The swap is real (step stays succeeded);
+    /// the receipt must say the installed version did not reach the claim
+    /// instead of implying it did. Empty when the claim was reached.
+    static func versionShortfallNote(installed: String?, claimed: String) -> String {
+        guard let installed, VersionOracle().isUpdateAvailable(installed: installed, available: claimed) else {
+            return ""
+        }
+        return "; NOTE: the installed bundle still reports \(installed), below the claimed \(claimed) — "
+            + "the vendor's artifact did not declare the new version, so later checks may offer it again"
     }
 
     /// Fluent detail text across BOTH error domains: frozen InstallerError cases
