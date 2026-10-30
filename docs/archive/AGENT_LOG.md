@@ -5,7 +5,53 @@ Honesty standard (CLAUDE.md §7) applies to this log: confirmed / suspected / un
 
 ---
 
-## 2026-10-29 — LOCAL-ONLY violation found + fixed (coordinator audit); owner purge decision pending
+## 2026-10-29 — FINAL BACKLOG CLOSED: dormant helper (§6 signed) + glue wiring + post-close polish
+
+**Dormant privileged helper (§6 signed → built, `0ea737f`, coordinator lane):** HelperProtocol
+(versioned Codable IPC contract, typed refusal vocabulary, verbatim receipt fields, coder
+seam), HelperInstallService (launchd template + SMAppService registration plan as pure DATA
+— ServiceManagement never imported, no process can be spawned from this module),
+HelperActivationGate (fail-closed matrix: two persisted consent switches default OFF + app
+Developer-ID + helper Developer-ID; dev-class "Spike0 Signing" identity tested to be
+REFUSED; every allow/refusal emits a full receipt). Built strictly more dormant than §6's
+letter (no live registrar/probe — post-enrollment wiring). Gate: 829/70 (+43/+3), CI green
+verbatim.
+
+**Glue wiring (`e95edd9`+`7c0c9f1`, finished in place after the OpenCode dispatch died on
+the free-usage limit — same inherited-finish pattern as wave 2; coordinator post-hoc audit
+2026-10-29 CONFIRMS correctness):** all five wave engines surfaced in BOTH surfaces —
+security (`security <app-path>` CLI + SecurityPanelCard), storefront/Setapp/iOS-on-Mac
+(annotations in CLI reports + security card), candidate deep-filter signals (install
+planning), proxy (ProxySession adopts persisted settings into the app's URLSession;
+ProxySettingsSheet + read-only `proxy show` — deliberately NO `proxy set` in CLI), brew
+(BrewPinsSheet + `brew-pins`/`brew-doctor`/`brew-index`). Frozen engines untouched (the
+commit's only Core-area file is its own new test file). Dead draft GlueModes.swift removed;
+parseCli + glue runners extracted for lint.
+
+**Post-close polish (owner session, `23c739b`+`d92d8e9`+`1231519`, coordinator-audited):**
+NSApplication materialization fix before the launch display-state policy; honest verdicts
+end to end + auto-check default ON with explicit `.noAutoCheck` opt-out (read-only source
+lookups only — auto-APPLY consent stays a separate, still-default-OFF boundary; legacy
+persisted-file compatibility kept); actionable rows — one-click Stage Install that STAGES
+the owner-run command and never executes it (fixes staged-command matching for app names
+containing spaces via `lastInstallBundleID`).
+
+**Final union: 839 tests / 71 suites, swiftlint 0 errors.** Local verbatim on `1231519`:
+"✔ Test run with 839 tests in 71 suites passed"; CI `27e584d9` verbatim: "✔ Test run with
+839 tests in 71 suites passed after 17.646 seconds." + "no lint errors".
+
+**Heading correction:** the sibling 2026-10-29 violation entry above was titled "owner
+purge decision pending" when recorded mid-day; the purge was EXECUTED the same day (owner
+decision) — see its body + docs/HISTORY-PURGE-MAP.md.
+
+**Deferred-by-design (NOT open work):** helper ACTIVATION (needs Apple Developer ID
+enrollment + explicit owner activation; dormant code shipped), crowd data + APNs (locked
+no-server rule), notarization/distribution (enrollment). Optional owner follow-up: a GitHub
+support ticket to expire cached views of pre-purge commit SHAs.
+
+---
+
+## 2026-10-29 — LOCAL-ONLY violation found + fixed + PURGED (coordinator audit; owner decision executed same day)
 
 **Confirmed (repo state, public remote):** owner asked for a full review of the inherited
 wave-2/3 work. The audit found `docs/reverse/` (GAP-ANALYSIS.md, MACUPDATER-FINDINGS.md,
